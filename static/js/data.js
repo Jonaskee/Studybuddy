@@ -43,7 +43,7 @@ const SB = (() => {
     haalAfstudeerrichtingen: (richtingId) =>
       api("/afstudeerrichtingen" + query({ richtingId })),
 
-    /** Scholen waarvan de naam q bevat. → [{id, naam}] */
+    /** Alle Vlaamse hogescholen + scholen uit de data waarvan de naam (of afkorting) q bevat. → [{naam}] */
     zoekScholen: (q) => api("/scholen" + query({ q: q || "" })),
 
     /** Richtingen van een school (op naam) die q bevatten. → [{id, naam, aantalPakketten}] */
@@ -59,7 +59,8 @@ const SB = (() => {
 
     haalPakket: (id) => api("/pakket/" + encodeURIComponent(id)),
 
-    /** PDF's uploaden. Eén request per bestand (Vercel staat max. ~4,5 MB per request toe). → [{naam, pad, tekst, waarschuwing}] */
+    /** PDF's uploaden. Eén request per bestand (Vercel staat max. ~4,5 MB per request toe).
+     *  → [{naam, pad, tekst, waarschuwing, vak, sp, semester}] (vak/sp/semester: uit de fiche gelezen of null) */
     async uploadFiches(bestanden) {
       const uit = [];
       for (const bestand of Array.from(bestanden)) {
@@ -73,7 +74,8 @@ const SB = (() => {
         }
         // handtekening: bewijs van de server dat de tekst echt uit deze PDF komt (anders negeert de server de tekst)
         uit.push({ naam: fiche.naam, grootte: bestand.size, pad: fiche.pad || null, tekst: fiche.tekst || "",
-                   handtekening: fiche.handtekening || null, waarschuwing: fiche.waarschuwing });
+                   handtekening: fiche.handtekening || null, waarschuwing: fiche.waarschuwing,
+                   vak: fiche.vak || null, sp: fiche.sp || null, semester: fiche.semester || null });
       }
       return uit;
     },

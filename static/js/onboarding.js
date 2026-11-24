@@ -15,7 +15,7 @@
     fase: null,
     gekozenId: null,
     vorige: "start",         // waar "Terug" op het nieuw-scherm naartoe gaat
-    nieuw: { vakken: [], files: [], kies: {} },
+    nieuw: { vakken: [], kies: {}, uploads: 0 },  // vak: {naam, semester, sp, soort, optie, fiche, nakijken}
     aanpassen: { pakket: null, uitgezet: new Set(), keuzes: {}, overgeslagen: new Set(), eigen: [] },
   };
 
@@ -72,35 +72,35 @@
   }
 
   // ---------- 1. school en richting ----------
-  function koppelSuggesties(input, lijst, zoek, render) {
+  // Leeg veld + focus toont de hele lijst (bv. alle hogescholen), typen filtert. na(): waar de focus heen gaat na een keuze.
+  function koppelSuggesties(input, lijst, zoek, render, na) {
     let timer;
     const sluit = () => { lijst.hidden = true; input.setAttribute("aria-expanded", "false"); };
-    input.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        const q = input.value.trim();
-        if (!q) { sluit(); checkGevonden(); return; }
-        let items;
-        try {
-          items = await zoek(q);
-        } catch {
-          sluit();
-          checkGevonden();
-          return;
-        }
-        lijst.innerHTML = items.map((it, i) =>
-          `<li role="none"><button type="button" role="option" data-i="${i}">${render(it, q)}</button></li>`).join("");
-        lijst.hidden = items.length === 0;
-        input.setAttribute("aria-expanded", String(items.length > 0));
-        lijst.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-          input.value = items[Number(b.dataset.i)].naam;
-          sluit();
-          input.dispatchEvent(new Event("change"));
-          checkGevonden();
-        }));
+    const zoekNu = async () => {
+      const q = input.value.trim();
+      let items;
+      try {
+        items = await zoek(q);
+      } catch {
+        sluit();
         checkGevonden();
-      }, 120);
-    });
+        return;
+      }
+      lijst.innerHTML = items.map((it, i) =>
+        `<li role="none"><button type="button" role="option" data-i="${i}">${render(it, q)}</button></li>`).join("");
+      lijst.hidden = items.length === 0;
+      input.setAttribute("aria-expanded", String(items.length > 0));
+      lijst.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        input.value = items[Number(b.dataset.i)].naam;
+        sluit();
+        input.dispatchEvent(new Event("change"));
+        checkGevonden();
+        if (na) na();
+      }));
+      checkGevonden();
+    };
+    input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(zoekNu, 120); });
+    input.addEventListener("focus", zoekNu);
     input.addEventListener("keydown", (e) => {
       if (e.key === "Escape" || e.key === "Tab") sluit();
       if (e.key === "ArrowDown" && !lijst.hidden) { e.preventDefault(); lijst.querySelector("button").focus(); }
@@ -123,7 +123,8 @@
     return esc(naam.slice(0, i)) + "<strong>" + esc(naam.slice(i, i + q.length)) + "</strong>" + esc(naam.slice(i + q.length));
   }
 
-  koppelSuggesties($("in-school"), $("sugg-school"), (q) => SB.zoekScholen(q), (s, q) => `<span>${markeer(s.naam, q)}</span>`);
+  koppelSuggesties($("in-school"), $("sugg-school"), (q) => SB.zoekScholen(q), (s, q) => `<span>${markeer(s.naam, q)}</span>`,
+    () => $("in-richting").focus());
   koppelSuggesties($("in-richting"), $("sugg-richting"), (q) => SB.zoekRichtingen($("in-school").value, q), (r, q) =>
     `<span>${markeer(r.naam, q)}</span><span class="cnt">${r.aantalPakketten} ${r.aantalPakketten === 1 ? "pakket" : "pakketten"}</span>`);
 
@@ -300,7 +301,6 @@
     $("afst-lijst").innerHTML = afst.map((a) => `<option value="${esc(a)}"></option>`).join("");
     if (state.fase) $("in-fase").value = state.fase;
     renderNieuwVakken();
-    renderFiles();
     zichtUitleg();
     fout("err-nieuw", "");
     toon("nieuw");
@@ -317,9 +317,12 @@
     const box = $("nieuw-vakken");
     const vakken = state.nieuw.vakken;
     if (!vakken.length) {
-      box.innerHTML = `<span class="muted small">Nog geen vakken toegevoegd.</span>`;
+      box.innerHTML = `<span class="muted small">Nog geen vakken. Sleep je fiches hierboven of typ een vak hieronder.</span>`;
     } else {
-      box.innerHTML = SEM_VOLGORDE.filter((s) => vakken.some((v) => v.semester === s)).map((s) => {
+      const semOpties = (gekozen) => SEM_VOLGORDE.map((s) =>
+        `<option value="${s}"${s === gekozen ? " selected" : ""}>${esc(s === "1of2" ? "S1 of S2" : s === "jaar" ? "Jaarvak" : "Sem " + s)}</option>`).join("");
+      box.innerHTML = `<div class="sp-sum"><span>${plural(vakken.length, "vak", "vakken")}</span><b>${som(vakken)} sp</b></div>`
+        + SEM_VOLGORDE.filter((s) => vakken.some((v) => v.semester === s)).map((s) => {
         const inSem = vakken.filter((v) => v.semester === s);
         return `<div class="sem">
           <div class="sem-h"><h2>${esc(semNaam(s))}</h2><span>${som(inSem)} sp</span></div>
@@ -327,19 +330,41 @@
             const i = vakken.indexOf(v);
             const soort = v.soort === "keuze" ? `<span class="badge groen">Keuzevak</span>`
               : v.soort === "optie" ? `<span class="badge groen">Optie: ${esc(v.optie)}</span>` : "";
-            return `<div class="nrow${i === vakken.length - 1 && state.nieuw.netToegevoegd ? " anim-pop" : ""}"><span class="nm">${esc(v.naam)}</span>${soort}<span class="badge">${v.sp} sp</span>
-              <button type="button" data-i="${i}" aria-label="Verwijder ${esc(v.naam)}">×</button></div>`;
+            const pop = v === state.nieuw.netToegevoegd ? " anim-pop" : "";
+            return `<div class="nrow vrow${v.nakijken ? " nakijken" : ""}${pop}">
+              <span class="nm" title="${esc(v.naam)}">${esc(v.naam)}</span>
+              ${soort}
+              <select class="mini-sel" data-sem="${i}" aria-label="Semester van ${esc(v.naam)}">${semOpties(v.semester)}</select>
+              <label class="nrow-sp"><input class="mini-sp" type="number" min="1" max="60" step="1" inputmode="numeric" value="${v.sp}" data-sp="${i}" aria-label="Studiepunten van ${esc(v.naam)}">sp</label>
+              <button type="button" class="fiche-btn${v.fiche ? " heeft" : ""}" data-fiche="${i}"
+                aria-label="${v.fiche ? "Andere ECTS-fiche kiezen voor " : "ECTS-fiche toevoegen aan "}${esc(v.naam)}"
+                title="${v.fiche ? esc(v.fiche.naam) : "ECTS-fiche (PDF) toevoegen"}">${v.fiche ? "✓ Fiche" : "+ Fiche"}</button>
+              <button type="button" data-del="${i}" aria-label="Verwijder ${esc(v.naam)}">×</button>
+            </div>`;
           }).join("")}
         </div>`;
       }).join("");
-      box.querySelectorAll("button[data-i]").forEach((b) => b.addEventListener("click", () => {
-        vakken.splice(Number(b.dataset.i), 1);
+      box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+        vakken.splice(Number(b.dataset.del), 1);
         renderNieuwVakken();
       }));
+      box.querySelectorAll("[data-sem]").forEach((sel) => sel.addEventListener("change", () => {
+        vakken[Number(sel.dataset.sem)].semester = sel.value;
+        renderNieuwVakken();
+      }));
+      box.querySelectorAll("[data-sp]").forEach((inp) => inp.addEventListener("change", () => {
+        const v = vakken[Number(inp.dataset.sp)];
+        v.sp = Math.min(60, Math.max(1, Math.round(Number(inp.value)) || v.sp));
+        v.nakijken = false;
+        renderNieuwVakken();
+      }));
+      box.querySelectorAll("[data-fiche]").forEach((b) => b.addEventListener("click", () => {
+        ficheVoor = Number(b.dataset.fiche);
+        $("in-pdf-vak").click();
+      }));
     }
-    state.nieuw.netToegevoegd = false;
+    state.nieuw.netToegevoegd = null;
     renderGroepInstellingen();
-    renderFiles();
     const opties = [...new Set(vakken.filter((v) => v.soort === "optie").map((v) => v.optie))];
     $("optie-lijst").innerHTML = opties.map((o) => `<option value="${esc(o)}"></option>`).join("");
   }
@@ -388,8 +413,9 @@
     if (state.nieuw.vakken.some((v) => v.naam.toLowerCase() === naam.toLowerCase())) {
       fout("err-nieuw", "Dit vak staat er al in."); $("in-vak").focus(); return false;
     }
-    state.nieuw.vakken.push({ naam, semester: $("in-vak-sem").value, sp, soort, optie: soort === "optie" ? optie : null });
-    state.nieuw.netToegevoegd = true;
+    const v = { naam, semester: $("in-vak-sem").value, sp, soort, optie: soort === "optie" ? optie : null, fiche: null };
+    state.nieuw.vakken.push(v);
+    state.nieuw.netToegevoegd = v;
     $("in-vak").value = "";
     fout("err-nieuw", "");
     renderNieuwVakken();
@@ -400,59 +426,68 @@
   $("in-vak").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); voegVakToe(); } });
   ["in-vak", "in-vak-optie", "in-vak-sp"].forEach((id) => $(id).addEventListener("input", () => fout("err-nieuw", "")));
 
-  function grootte(b) { return b > 1024 * 1024 ? (b / 1024 / 1024).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " kB"; }
-
-  function voegFilesToe(lijst) {
-    const geweigerd = [];
-    for (const f of lijst) {
-      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
-      if (!isPdf || f.size > MAX_PDF) { geweigerd.push(f.name); continue; }
-      if (!state.nieuw.files.some((x) => x.name === f.name && x.size === f.size)) state.nieuw.files.push(f);
-    }
-    renderFiles();
-    if (geweigerd.length) toast("Niet toegevoegd (geen PDF of te groot): " + geweigerd.join(", "));
-  }
-
-  // Bij welk vak hoort een PDF? Zelf gekozen (f.vak) of automatisch op bestandsnaam.
+  // ---------- ECTS-fiches: meteen uploaden, de server leest naam, studiepunten en semester ----------
+  // Een fiche zonder doel wordt gekoppeld aan het vak met dezelfde naam, of wordt zelf een nieuw vak.
+  let ficheVoor = null;  // index van het vak waarvoor "+ Fiche" geklikt werd
   const sleutel = (s) => s.toLowerCase().replace(/\.pdf$/, "").replace(/^ects[_ -]?fiche[_ -]?/, "").replace(/[^a-z0-9]/g, "");
-  function raadVak(bestandsnaam) {
-    const b = sleutel(bestandsnaam);
-    if (!b) return null;
-    const v = state.nieuw.vakken.find((x) => { const n = sleutel(x.naam); return n && (b.includes(n) || n.includes(b)); });
-    return v ? v.naam : null;
-  }
-  function vakVoorFile(f) {
-    if (f.vak !== undefined && (f.vak === "" || state.nieuw.vakken.some((v) => v.naam === f.vak))) return f.vak || null;
-    return raadVak(f.name);
+  function naamUitBestand(bestand) {
+    const n = bestand.replace(/\.pdf$/i, "").replace(/^ects[_ -]?fiche[_ -]?/i, "").replace(/[_-]+/g, " ").trim();
+    return n ? n[0].toUpperCase() + n.slice(1) : "Nieuw vak";
   }
 
-  function renderFiles() {
+  function koppelFiche(bestand, fiche, doel) {
     const vakken = state.nieuw.vakken;
-    $("files").innerHTML = state.nieuw.files.map((f, i) => {
-      const gekozen = vakVoorFile(f);
-      const opties = [`<option value="">${vakken.length ? "— kies het vak —" : "voeg eerst vakken toe"}</option>`]
-        .concat(vakken.map((v) => `<option value="${esc(v.naam)}"${v.naam === gekozen ? " selected" : ""}>${esc(v.naam)}</option>`)).join("");
-      return `<div class="file${gekozen ? "" : " los"}">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" style="color: var(--groen-text); flex-shrink: 0;"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>
-      <span class="nm" title="${esc(f.name)}">${esc(f.name)}<small class="muted">${grootte(f.size)}</small></span>
-      <select class="file-vak" data-i="${i}" aria-label="Vak voor ${esc(f.name)}">${opties}</select>
-      <button type="button" data-i="${i}" aria-label="Verwijder ${esc(f.name)}">×</button></div>`;
-    }).join("");
-    $("files").querySelectorAll("select").forEach((sel) => sel.addEventListener("change", () => {
-      state.nieuw.files[Number(sel.dataset.i)].vak = sel.value;
-      renderFiles();
-    }));
-    $("files").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-      state.nieuw.files.splice(Number(b.dataset.i), 1);
-      renderFiles();
-    }));
+    const sleutels = [sleutel(bestand), fiche.vak ? sleutel(fiche.vak) : ""].filter(Boolean);
+    // zelfde naam = die fiche vervangen; anders een gelijkaardige naam zonder fiche
+    let v = doel
+      ?? vakken.find((x) => fiche.vak && x.naam.toLowerCase() === fiche.vak.toLowerCase())
+      ?? vakken.find((x) => !x.fiche && sleutels.some((b) => { const n = sleutel(x.naam); return n && (b.includes(n) || n.includes(b)); }));
+    if (!v) {
+      v = { naam: fiche.vak || naamUitBestand(bestand), semester: fiche.semester || "1", sp: fiche.sp || 6,
+            soort: "verplicht", optie: null, nakijken: !fiche.sp };
+      vakken.push(v);
+      state.nieuw.netToegevoegd = v;
+      if (!fiche.sp) toast(`Geen studiepunten gevonden in ${bestand}: vul ze zelf in`);
+    }
+    v.fiche = { naam: fiche.naam, pad: fiche.pad || null, tekst: fiche.tekst || undefined, handtekening: fiche.handtekening || undefined };
+    if (fiche.waarschuwing) toast(`${bestand}: ${fiche.waarschuwing}`);
   }
 
-  $("in-pdf").addEventListener("change", (e) => { voegFilesToe(e.target.files); e.target.value = ""; });
+  async function leesFiches(lijst, doel) {
+    const pdfs = [...lijst].filter((f) => (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) && f.size <= MAX_PDF);
+    const geweigerd = [...lijst].filter((f) => !pdfs.includes(f)).map((f) => f.name);
+    if (geweigerd.length) toast("Niet toegevoegd (geen PDF of groter dan 4 MB): " + geweigerd.join(", "));
+    for (const f of pdfs) {
+      state.nieuw.uploads++;
+      uploadStatus();
+      try {
+        const [fiche] = await SB.uploadFiches([f]);
+        koppelFiche(f.name, fiche, doel);
+        renderNieuwVakken();
+      } catch (err) {
+        toast(err.message || `Upload van ${f.name} mislukt.`);
+      } finally {
+        state.nieuw.uploads--;
+        uploadStatus();
+      }
+    }
+  }
+  function uploadStatus() {
+    const n = state.nieuw.uploads;
+    $("upload-status").hidden = !n;
+    $("upload-status").textContent = n ? `Fiche${n === 1 ? "" : "s"} lezen… (${n})` : "";
+  }
+
+  $("in-pdf").addEventListener("change", (e) => { leesFiches(e.target.files); e.target.value = ""; });
+  $("in-pdf-vak").addEventListener("change", (e) => {
+    const doel = state.nieuw.vakken[ficheVoor];
+    if (doel && e.target.files.length) leesFiches([e.target.files[0]], doel);
+    e.target.value = "";
+  });
   const drop = $("drop");
   ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
-  drop.addEventListener("drop", (e) => { e.preventDefault(); voegFilesToe(e.dataTransfer.files); });
+  drop.addEventListener("drop", (e) => { e.preventDefault(); leesFiches(e.dataTransfer.files); });
 
   function zicht() { return document.querySelector('input[name="zicht"]:checked').value; }
   function zichtUitleg() {
@@ -471,27 +506,15 @@
       $("in-vak").focus();
       return;
     }
-    const los = state.nieuw.files.filter((f) => !vakVoorFile(f));
-    if (los.length) {
-      fout("err-nieuw", "Kies bij elke PDF het vak waar hij bij hoort (of verwijder hem): " + los.map((f) => f.name).join(", "));
-      return;
-    }
-    const dubbel = state.nieuw.vakken.find((v) => state.nieuw.files.filter((f) => vakVoorFile(f) === v.naam).length > 1);
-    if (dubbel) {
-      fout("err-nieuw", `Er zijn meerdere PDF's gekoppeld aan "${dubbel.naam}". Kies er één per vak.`);
+    if (state.nieuw.uploads) {
+      fout("err-nieuw", "Even wachten: de fiches worden nog gelezen.");
       return;
     }
     const knop = $("btn-nieuw");
     bezig(knop, true);
     try {
-      const teUploaden = state.nieuw.files;
-      const fiches = await SB.uploadFiches(teUploaden);
-      const waarschuwingen = fiches.filter((x) => x.waarschuwing).map((x) => `${x.naam}: ${x.waarschuwing}`);
-      if (waarschuwingen.length) toast(waarschuwingen.join(" · "));
       const groepen = [];
       const vakken = state.nieuw.vakken.map((v) => {
-        const i = teUploaden.findIndex((f) => vakVoorFile(f) === v.naam);
-        const f = i >= 0 ? fiches[i] : null;
         const groep = groepIdVoor(v);
         if (groep && !groepen.some((g) => g.id === groep)) {
           groepen.push({
@@ -499,9 +522,7 @@
             naam: v.soort === "optie" ? "Keuzeoptie" : `Keuzevakken ${semNaam(v.semester).toLowerCase()}`,
           });
         }
-        return { naam: v.naam, semester: v.semester, sp: v.sp,
-                 fiche: f ? { naam: f.naam, pad: f.pad || null, tekst: f.tekst || undefined, handtekening: f.handtekening || undefined } : null,
-                 groep, optie: v.optie };
+        return { naam: v.naam, semester: v.semester, sp: v.sp, fiche: v.fiche || null, groep, optie: v.optie };
       });
       const pakket = await SB.maakPakket({
         schoolNaam: state.school, richtingNaam: state.richting,

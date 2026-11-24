@@ -75,6 +75,14 @@ persoonlijke_pakketten (student_id, basis_pakket_id → pakketten, uitgezet json
 wijzigingsvoorstellen  (id, pakket_id → pakketten, tekst, door, op, status, afwijs_reden)
 ```
 
+Scholen: `HOGESCHOLEN` in `opslag.py` bevat alle Vlaamse hogescholen (met afkortingen
+zoals "kdg", "ehb", "artesis" als zoekwoorden). Ze verschijnen in de onboarding ook zonder
+pakket; een school komt pas in de tabel `scholen` bij het eerste pakket.
+
+Vakken toevoegen: een geüploade ECTS-fiche wordt meteen een vak. `fiche_gegevens()` leest
+de vaknaam, studiepunten en het semester uit de PDF-tekst; de student kan alles in de lijst
+nog aanpassen. Een fiche met dezelfde naam als een bestaand vak wordt aan dat vak gekoppeld.
+
 Hoe keuzes werken:
 - **Keuzevak:** vakken met dezelfde `groep` (soort `keuze`); de student kiest er `kies` uit.
 - **Keuzeoptie:** een groep met soort `optie`; elk vak in die groep hoort via `optie` bij een bundel (bv. "Startup"). De student kiest `kies` opties en krijgt alle vakken van die optie.
