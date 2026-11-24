@@ -23,7 +23,7 @@ dus de UI is niet veranderd. Achter de API staat `opslag.py`:
 browser (data.js)
    → /api/data/...            (data_api.py, Flask)
        → opslag.py
-            → Supabase (REST + Storage)   als SUPABASE_URL + SUPABASE_SERVICE_KEY gezet zijn
+            → Supabase (REST)             als SUPABASE_URL, SUPABASE_KEY en SUPABASE_SERVER_SLEUTEL gezet zijn
             → data_store.json             anders (lokaal ontwikkelen)
 ```
 
@@ -35,23 +35,24 @@ vragen) in `app.py`.
 1. Maak een project op supabase.com.
 2. SQL Editor → voer na elkaar uit:
    `supabase/schema.sql` (de standaard ECTS-fiches), `supabase/seed.sql` (de 8 fiches),
-   `supabase/verbruik.sql` (AI-verbruik en limieten) en `supabase.sql` (onboarding en moderatie).
+   `supabase/verbruik.sql` (AI-verbruik en limieten), `supabase.sql` (onboarding en moderatie)
+   en `supabase/opslag_rls.sql` (wie aan de onboarding-tabellen mag).
    Voer in `verbruik.sql` ook de eenmalige `insert` onderaan de commentaar uit (hash van `SUPABASE_SERVER_SLEUTEL`).
-3. Storage → New bucket → naam `ects-fiches`, Private (of laat de SQL het doen).
-4. Project Settings → API Keys: kopieer de **Project URL**, de **publishable**-key en de **service_role**-key
-   (Legacy API keys → service_role → Reveal, begint met `eyJ`).
-5. Zet ze in `.env`:
+3. Project Settings → API Keys: kopieer de **Project URL** en de **publishable**-key.
+4. Zet ze in `.env`, samen met een zelf gekozen lange geheime sleutel:
 
 ```
 SUPABASE_URL=https://jouwproject.supabase.co
-SUPABASE_KEY=sb_publishable_...          # mag publiek: leest enkel de standaardfiches
-SUPABASE_SERVICE_KEY=eyJ...service_role... # geheim: onboarding, moderatie en PDF's
-SUPABASE_SERVER_SLEUTEL=...              # geheim, zelf gekozen: verbruik en limieten (zie verbruik.sql)
+SUPABASE_KEY=sb_publishable_...   # mag publiek: leest enkel de standaardfiches
+SUPABASE_SERVER_SLEUTEL=...       # geheim, zelf gekozen: verbruik, limieten én onboarding
 ```
 
-Drie sleutels, elk met één taak. De service_role-key omzeilt RLS en blijft dus
-server-side; de browser krijgt nooit een sleutel te zien. Test met
-`python controleer_supabase.py` (toont nooit de sleutels zelf).
+Er is geen service_role-key nodig. De server stuurt `SUPABASE_SERVER_SLEUTEL` mee in
+de header `x-studiebuddy-sleutel`; RLS laat de onboarding-tabellen enkel toe als de
+hash daarvan klopt (`supabase/opslag_rls.sql`). Zonder die header kan de publieke key
+niets in die tabellen. Een gelekte serversleutel geeft dus enkel toegang tot deze
+tabellen en de verbruiksfuncties, niet tot de hele databank. De browser krijgt nooit
+een sleutel te zien. Test met `python controleer_supabase.py` (toont nooit de sleutels zelf).
 
 De voorbeelddata (scholen, richtingen, pakketten, één voorstel) wordt bij de
 eerste data-aanvraag automatisch geplaatst als de databank leeg is. Uitzetten
@@ -105,8 +106,7 @@ vluchtig: elke cold start begint opnieuw. Gebruik daar Supabase.
 | `R33_API_KEY` | verplicht voor de chat (route33) |
 | `SUPABASE_URL` | bv. `https://xxxx.supabase.co` |
 | `SUPABASE_KEY` | publishable key: leest enkel de standaard ECTS-fiches (tabel `vakken`) |
-| `SUPABASE_SERVER_SLEUTEL` | zelf gekozen geheim: enkel hiermee kan de server het AI-verbruik lezen en boeken (`supabase/verbruik.sql`, de databank bewaart alleen de hash) |
-| `SUPABASE_SERVICE_KEY` | service_role-key: onboarding, moderatie en PDF-opslag. Zonder valt de opslag terug op `data_store.json` |
+| `SUPABASE_SERVER_SLEUTEL` | zelf gekozen geheim: enkel hiermee kan de server het AI-verbruik boeken en aan de onboarding-tabellen (de databank bewaart alleen de hash). Zonder valt de onboarding-opslag terug op `data_store.json` |
 | `SITE_USER` + `SITE_WACHTWOORD` | optioneel: hele site achter HTTP Basic Auth |
 | `ADMIN_USER` + `ADMIN_WACHTWOORD` | login voor `/admin` (Basic Auth) en `/moderatie` (of `MODERATIE_CODE` voor enkel moderatie) |
 | `SECRET_KEY` | optioneel: eigen geheim voor de moderatorcookie en de handtekening op PDF-tekst (anders afgeleid van de andere geheimen) |
@@ -120,9 +120,8 @@ vluchtig: elke cold start begint opnieuw. Gebruik daar Supabase.
 | `DATA_BESTAND` / `UPLOAD_MAP` | optioneel: ander pad voor de lokale fallback |
 
 Op Vercel zet je dezelfde variabelen bij **Environment Variables** (geheimen als
-*Sensitive*). Verplicht daar: `R33_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`,
-`SUPABASE_SERVER_SLEUTEL` en `SUPABASE_SERVICE_KEY` (anders ben je de pakketten
-kwijt bij elke herstart).
+*Sensitive*). Verplicht daar: `R33_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY` en
+`SUPABASE_SERVER_SLEUTEL`.
 
 De AI-limieten (totaalbudget, daglimiet, vragen per browser) en de vraaggeschiedenis
 staan in Supabase (`private.verbruik`), dus ze overleven een herstart en gelden over
@@ -177,6 +176,7 @@ De hele site achter HTTP Basic Auth zetten kan met `SITE_USER` + `SITE_WACHTWOOR
 
 - Beveiligingsheaders op elke pagina (CSP: enkel eigen code + Google Fonts, geen iframes, geen caching van pagina's).
 - Uploads en wijzigingen: max. 30 per browser per kwartier (300 voor de hele site), JSON max. 256 kB.
+- Geüploade PDF's staan in de tabel `fiche_pdfs`, samen max. 100 MB (trigger in `supabase/opslag_rls.sql`), zodat niemand de gratis databank van 500 MB kan vullen. Daarboven wordt enkel de tekst nog bewaard.
 - Foutmeldingen van route33 of Supabase gaan naar de serverlog, nooit naar de gebruiker.
 
 ## Bekende shortcuts

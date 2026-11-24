@@ -4,7 +4,7 @@ De frontend praat nooit rechtstreeks met de databank. Alle pakketten, scholen,
 voorstellen en persoonlijke pakketten lopen via deze module, die twee
 implementaties heeft:
 
-* SupabaseOpslag  – zodra SUPABASE_URL + een server-sleutel in de omgeving staan.
+* SupabaseOpslag  – zodra SUPABASE_URL, SUPABASE_KEY en SUPABASE_SERVER_SLEUTEL in de omgeving staan.
                     Dit is de bedoelde productieopslag (werkt ook op Vercel).
 * LokaleOpslag    – een JSON-bestand naast dit bestand. Handig om lokaal te
                     ontwikkelen zonder Supabase. Op Vercel is het bestand
@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import threading
 from datetime import date
 from pathlib import Path
@@ -40,7 +41,6 @@ ACADEMIEJAREN = ["2026-2027", "2025-2026"]
 MAX_NAAM = 120
 MAX_TEKST = 1000
 MAX_FICHE_BYTES = 4 * 1024 * 1024  # zelfde grens als de frontend; Vercel laat per request max. ~4,5 MB door
-FICHE_BUCKET = "ects-fiches"
 # Ondertekent de tekst die de server uit een PDF haalde: zo kan niemand zelf "fichetekst" meesturen bij een pakket
 # zonder echte PDF. Op Vercel bestaat R33_API_KEY altijd, zodat elke serverinstantie dezelfde sleutel heeft.
 _FICHE_GEHEIM = hashlib.sha256(("studiebuddy-fiche\n" + (os.getenv("SECRET_KEY") or os.getenv("SUPABASE_SERVER_SLEUTEL")
@@ -340,22 +340,21 @@ class LokaleOpslag:
 
 
 # ---------------------------------------------------------------------------
-# Supabase-opslag (REST + Storage)
+# Supabase-opslag (REST)
 # ---------------------------------------------------------------------------
 
 class SupabaseOpslag:
     is_lokaal = False
 
-    def __init__(self, url: str, sleutel: str):
-        basis = url.rstrip("/")
-        # De oude service_role-key is een JWT en mag ook als Bearer; een nieuwe sb_secret_-key enkel als apikey.
-        auth = {"apikey": sleutel, **({"Authorization": f"Bearer {sleutel}"} if sleutel.startswith("eyJ") else {})}
+    def __init__(self, url: str, publieke_sleutel: str, server_sleutel: str):
+        # Geen service_role-key: de publieke key plus de geheime serversleutel in een header. RLS laat de
+        # onboarding-tabellen enkel toe als die sleutel klopt (supabase/opslag_rls.sql).
         self.client = httpx.Client(
-            base_url=basis + "/rest/v1",
-            headers={**auth, "Content-Type": "application/json"},
+            base_url=url.rstrip("/") + "/rest/v1",
+            headers={"apikey": publieke_sleutel, "x-studiebuddy-sleutel": server_sleutel,
+                     "Content-Type": "application/json"},
             timeout=20,
         )
-        self.storage = httpx.Client(base_url=basis + "/storage/v1", headers=auth, timeout=60)
 
     def _controleer(self, antwoord):
         if antwoord.status_code >= 400:
@@ -453,17 +452,13 @@ class SupabaseOpslag:
             self._delete(tabel, {"id": "neq.0"})
 
     def bewaar_fiche(self, naam, inhoud):
-        veilig = veilige_bestandsnaam(naam)
-        pad = f"{nieuw_id()}-{veilig}"
-        antwoord = self.storage.post(
-            f"/object/{FICHE_BUCKET}/{pad}",
-            content=inhoud,
-            headers={"Content-Type": "application/pdf", "x-upsert": "true"},
-        )
+        pad = f"{nieuw_id()}-{veilige_bestandsnaam(naam)}"
+        antwoord = self.client.post("/fiche_pdfs", json={"pad": pad, "inhoud": "\\x" + inhoud.hex()},
+                                    headers={"Prefer": "return=minimal"}, timeout=60)
         if antwoord.status_code >= 400:
-            # Bucket ontbreekt of is niet schrijfbaar: pakket opslaan lukt nog, enkel de PDF niet.
-            return {"naam": Path(naam).name, "pad": None,
-                    "waarschuwing": f"PDF niet geüpload ({antwoord.status_code}); maak de bucket '{FICHE_BUCKET}' aan."}
+            # De PDF zelf bewaren lukte niet; de tekst eruit (wat de chat gebruikt) werkt nog wel.
+            print(f"PDF niet bewaard: {antwoord.status_code} {antwoord.text[:200]}", file=sys.stderr)
+            return {"naam": Path(naam).name, "pad": None, "waarschuwing": "De PDF zelf kon niet bewaard worden."}
         return {"naam": Path(naam).name, "pad": pad}
 
 
@@ -482,10 +477,10 @@ _opslag_slot = threading.Lock()
 
 def maak_opslag():
     url = (os.getenv("SUPABASE_URL") or "").strip()
-    # Eigen naam: SUPABASE_KEY is de publieke key (kan hier niets) en SUPABASE_SERVER_SLEUTEL de verbruikssleutel.
-    sleutel = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
-    if url.startswith("http") and sleutel:
-        return SupabaseOpslag(url, sleutel)
+    publiek = (os.getenv("SUPABASE_KEY") or "").strip()
+    server = (os.getenv("SUPABASE_SERVER_SLEUTEL") or "").strip()
+    if url.startswith("http") and publiek and server:
+        return SupabaseOpslag(url, publiek, server)
     pad = os.getenv("DATA_BESTAND") or ("/tmp/studiebuddy-data.json" if os.getenv("VERCEL") else str(MAP / "data_store.json"))
     return LokaleOpslag(Path(pad))
 
@@ -555,7 +550,7 @@ def fiche_gegevens(tekst):
 
 
 def bewaar_fiche(naam, inhoud):
-    """PDF in Supabase Storage (of lokaal) bewaren + de tekst eruit halen voor de chat."""
+    """PDF in Supabase (tabel fiche_pdfs, of lokaal) bewaren + de tekst eruit halen voor de chat."""
     if len(inhoud) > MAX_FICHE_BYTES:
         raise ValidatieFout("Het bestand is te groot (max. 4 MB).")
     if not inhoud.lstrip()[:5].startswith(b"%PDF"):
