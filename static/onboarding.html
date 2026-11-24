@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="nl" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Welkom bij StudieBuddy</title>
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("sb-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+<link rel="manifest" href="/static/img/site.webmanifest">
+<meta name="theme-color" content="#056950">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/static/css/studybuddy.css">
+<style>
+  .shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+  .side { display: none; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; }
+  .content { flex: 1; width: 100%; max-width: 640px; margin: 0 auto; padding: 4px 20px 24px; display: flex; flex-direction: column; }
+  .screen { flex: 1; display: flex; flex-direction: column; gap: 22px; position: relative; }
+  .head { display: flex; flex-direction: column; gap: 10px; }
+  .back { align-self: flex-start; }
+  .foot { margin-top: auto; padding: 16px 0 calc(8px + env(safe-area-inset-bottom)); position: sticky; bottom: 0; background: var(--bg); display: flex; flex-direction: column; gap: 10px; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+
+  /* decor */
+  .blob { position: absolute; border-radius: 50%; background: var(--groen); pointer-events: none; }
+  .screen > .blob { top: -190px; right: -110px; width: 230px; height: 230px; z-index: -1; }
+  .screen { isolation: isolate; }
+  .content { overflow: hidden; }
+
+  .hero-mascot { position: absolute; top: -4px; right: -4px; width: 116px; height: 116px; z-index: -1; }
+  #scr-start .head { padding-right: 96px; }
+  @media (min-width: 960px) { #scr-start .head { padding-right: 0; } }
+
+  /* suggesties */
+  .sugg { list-style: none; margin: 6px 0 0; padding: 0; border-radius: var(--radius); background: var(--card); border: 2px solid var(--line); overflow: hidden; }
+  .sugg button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 13px 16px; border: 0; background: transparent; text-align: left; cursor: pointer; font-size: 15px; }
+  .sugg li + li button { border-top: 1px solid var(--line); }
+  .sugg button:hover, .sugg button:focus-visible { background: var(--hl); outline: none; }
+  .sugg .cnt { font-size: 12px; font-weight: 700; color: var(--groen-text); white-space: nowrap; }
+
+  /* gevonden-kaart */
+  .found { display: flex; gap: 14px; align-items: center; padding: 16px; border-radius: 20px; background: var(--groen); color: var(--on-groen); transform: rotate(-1deg); }
+  .found.empty { background: var(--card); color: var(--text); transform: none; box-shadow: 0 0 0 1px var(--ring); }
+  .found strong { font-family: "Bricolage Grotesque", sans-serif; font-size: 18px; font-weight: 800; display: block; }
+  .found .ok { width: 44px; height: 44px; border-radius: 50%; background: var(--on-groen); color: var(--groen); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .found .ok svg { width: 22px; height: 22px; }
+
+  /* pakketkaarten */
+  .pkgs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .pkg { display: flex; gap: 14px; align-items: center; padding: 14px; border-radius: 20px; border: 3px solid transparent; background: var(--card); box-shadow: 0 0 0 1px var(--ring); position: relative; cursor: pointer; }
+  .pkg:has(input:checked) { border-color: var(--groen-line); }
+  .pkg:has(input:focus-visible) { outline: 3px solid var(--groen-line); outline-offset: 2px; }
+  .tile { width: 58px; height: 58px; border-radius: 16px; background: var(--chip); color: var(--chip-text); display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; }
+  .pkg:has(input:checked) .tile { background: var(--groen); color: var(--on-groen); }
+  .tile b { font-family: "Bricolage Grotesque", sans-serif; font-size: 26px; line-height: 1; }
+  .tile small { font-size: 10px; font-weight: 700; }
+  .pkg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .pkg-title { font-size: 16px; font-weight: 700; }
+  .pkg input { width: 22px; height: 22px; margin: 0; accent-color: var(--groen-line); flex-shrink: 0; }
+  .pkg .sticker { position: absolute; top: -12px; right: 16px; transform: rotate(4deg); }
+  .warn { font-size: 12px; font-weight: 700; color: var(--text); }
+  .pkg-new { display: flex; gap: 14px; align-items: center; padding: 14px; border-radius: 20px; border: 2px dashed var(--line-2); background: transparent; color: var(--text); text-align: left; cursor: pointer; width: 100%; }
+  .pkg-new .tile { background: transparent; border: 2px dashed var(--line-2); color: var(--groen-text); }
+
+  /* semesters, groepen, studiepunten */
+  .rowlab { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+  .pkg-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .badge { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 7px; background: var(--chip); color: var(--chip-text); white-space: nowrap; }
+  .badge.groen { background: var(--groen); color: var(--on-groen); }
+  .sem { display: flex; flex-direction: column; gap: 10px; }
+  .sem-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .sem-h h2 { font-size: 20px; }
+  .sem-h span { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .groep { border-radius: 20px; background: var(--card); box-shadow: 0 0 0 1px var(--ring); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .groep-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .groep-h strong { font-size: 16px; }
+  .keuze { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--line); cursor: pointer; }
+  .keuze:has(input:checked) { border-color: var(--groen-line); background: var(--hl); }
+  .keuze:has(input:disabled) { opacity: .55; cursor: default; }
+  .keuze input { width: 20px; height: 20px; margin: 0; accent-color: var(--groen-line); flex-shrink: 0; }
+  .keuze .nm { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; }
+  .keuze .nm small { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .mini-sp { width: 56px; height: 44px; border: 0; border-radius: 12px; background: var(--chip); color: var(--chip-text); text-align: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .hervat { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; padding: 16px; border-radius: 20px; background: var(--card); box-shadow: inset 0 0 0 2px var(--groen-line); }
+  .volg { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--muted); font-weight: 600; }
+  .groep.uit { background: var(--card-2); box-shadow: inset 0 0 0 2px var(--line); }
+  .groep.uit strong { color: var(--muted); }
+  .groep.uit .keuze { opacity: .45; }
+  .sp-sum { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 18px; background: var(--groen); color: var(--on-groen); font-weight: 700; }
+  .sp-sum b { font-family: "Bricolage Grotesque", sans-serif; font-size: 22px; }
+  .nrow { display: flex; align-items: center; gap: 10px; padding: 8px 6px 8px 14px; border-radius: 14px; background: var(--card); box-shadow: 0 0 0 1px var(--ring); }
+  .nrow .nm { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nrow button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; font-size: 18px; color: var(--muted); }
+  .nrow button:hover { background: var(--hl); }
+  .vakform { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 20px; border: 2px dashed var(--line-2); }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .boxsel input { border: 0; background: transparent; padding: 0; font-size: 16px; font-weight: 700; color: var(--text); width: 100%; }
+  .boxsel input:focus { outline: none; }
+  .kies-n { width: 64px; height: 40px; border-radius: 12px; border: 2px solid var(--line); background: var(--bg); text-align: center; font-weight: 700; }
+  .mini-sel { height: 44px; border: 0; border-radius: 12px; background: var(--chip); color: var(--chip-text); padding: 0 8px; font-weight: 600; font-size: 13px; }
+  @media (max-width: 420px) {
+    .grid-3 { grid-template-columns: 1fr 1fr; }
+    .grid-3 > :last-child { grid-column: 1 / -1; }
+  }
+
+  /* stappen */
+  .step-h { display: flex; gap: 10px; align-items: center; font-size: 16px; font-weight: 700; }
+  .step-h span { width: 26px; height: 26px; border-radius: 50%; background: var(--groen); color: var(--on-groen); font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .boxsel { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: var(--radius); background: var(--card); border: 2px solid var(--line); }
+  .boxsel span { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .boxsel select { border: 0; background: transparent; padding: 0; font-size: 16px; font-weight: 700; color: var(--text); width: 100%; }
+  .boxsel select option { color: #17122B; }
+  .boxsel:focus-within { border-color: var(--groen-line); }
+  .boxsel select:focus { outline: none; }
+
+  .addrow { display: flex; gap: 8px; padding: 6px; border-radius: 18px; background: var(--card); border: 2px solid var(--line); }
+  .addrow:focus-within { border-color: var(--groen-line); }
+  .addrow.dashed { background: transparent; border-style: dashed; border-color: var(--line-2); }
+  .addrow input { flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 0; background: transparent; font-size: 15px; }
+  .addrow input:focus { outline: none; }
+  .addbtn { width: 44px; height: 44px; border-radius: 13px; border: 0; background: var(--groen); color: var(--on-groen); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .addbtn svg { width: 20px; height: 20px; }
+
+  .drop { display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: 20px; border: 2px dashed var(--groen-line); background: var(--card-2); cursor: pointer; }
+  .drop.over { background: var(--hl); }
+  .drop:focus-within { outline: 3px solid var(--groen-line); outline-offset: 2px; }
+  .drop .ico { width: 48px; height: 48px; border-radius: 14px; background: var(--groen); color: var(--on-groen); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .drop .ico svg { width: 24px; height: 24px; }
+  .file { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 14px; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--ring); }
+  .file .nm { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; font-size: 18px; color: var(--muted); }
+  .file button:hover { background: var(--hl); }
+
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; border-radius: 18px; background: var(--card); box-shadow: 0 0 0 1px var(--ring); }
+  .seg label { height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .seg label:has(input:checked) { background: var(--inv-bg); color: var(--inv-text); font-weight: 700; }
+  .seg label:has(input:focus-visible) { outline: 3px solid var(--groen-line); outline-offset: 2px; }
+
+  /* vakken aan/uit */
+  .vak { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 16px; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--ring); cursor: pointer; position: relative; }
+  .vak .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--groen); flex-shrink: 0; }
+  .vak .nm { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 15px; font-weight: 600; }
+  .vak .nm small { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .vak:has(.switch:not(:checked)) { background: var(--card-2); box-shadow: inset 0 0 0 2px var(--line); }
+  .vak:has(.switch:not(:checked)) .dot { background: var(--line); }
+  .vak:has(.switch:not(:checked)) .nm > span { color: var(--muted); text-decoration: line-through; }
+  .vak.eigen { box-shadow: inset 0 0 0 2px var(--groen-line); }
+  .vak.eigen .sticker { position: absolute; top: -11px; left: 14px; }
+  .vak .del { width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
+
+  .voorstel { border-radius: 20px; background: var(--card); box-shadow: 0 0 0 1px var(--ring); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .voorstel-top { display: flex; gap: 14px; align-items: flex-start; }
+  .voorstel-top svg { width: 26px; height: 26px; color: var(--groen-text); flex-shrink: 0; }
+
+  /* status */
+  .illus { height: 220px; position: relative; }
+  .illus .c1 { position: absolute; left: 30px; top: 40px; width: 200px; height: 150px; border-radius: 22px; background: var(--chip); transform: rotate(-10deg); }
+  .illus .c2 { position: absolute; left: 80px; top: 30px; width: 210px; height: 160px; border-radius: 22px; background: var(--card); border: 3px solid var(--line); transform: rotate(4deg); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .illus .c2 i { display: block; height: 8px; border-radius: 4px; background: var(--line); }
+  .illus .c2 i:first-child { height: 12px; width: 70%; background: var(--text); }
+  .illus .stamp { position: absolute; left: 170px; top: 150px; padding: 10px 16px; border-radius: 12px; border: 3px solid var(--groen-line); color: var(--groen-text); background: var(--bg); font-family: "Bricolage Grotesque", sans-serif; font-size: 20px; font-weight: 800; letter-spacing: 1px; transform: rotate(-12deg); }
+  .illus .dotx { position: absolute; left: 4px; top: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--groen); }
+  .timeline { display: flex; align-items: flex-start; }
+  .timeline .st { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; text-align: center; }
+  .timeline .bol { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--line); display: flex; align-items: center; justify-content: center; font-weight: 800; }
+  .timeline .done .bol { background: var(--groen); border-color: var(--groen); color: var(--on-groen); }
+  .timeline .now .bol { border-color: var(--text); background: var(--chip); }
+  .timeline .todo { color: var(--muted); }
+  .timeline .ln { flex: 1; height: 3px; border-radius: 2px; background: var(--line); margin-top: 14px; }
+  .timeline .ln.on { background: var(--groen); }
+  .note { padding: 14px 16px; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--ring); font-size: 14px; }
+
+  /* desktop: merkpaneel links, inhoud rechts */
+  @media (min-width: 960px) {
+    .shell { flex-direction: row; }
+    .topbar { display: none; }
+    .side {
+      display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
+      width: 400px; flex-shrink: 0; padding: 32px; background: var(--card-2);
+      border-right: 1px solid var(--line); position: sticky; top: 0; height: 100vh; overflow: hidden;
+    }
+    .side-top { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1; }
+    .side-mascot { width: 220px; height: 220px; align-self: center; }
+    .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; position: relative; }
+    .steps li { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 16px; color: var(--muted); font-weight: 600; }
+    .steps li b { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+    .steps li.now { background: var(--card); color: var(--text); box-shadow: 0 0 0 1px var(--ring); }
+    .steps li.now b { background: var(--groen); border-color: var(--groen); color: var(--on-groen); }
+    .steps li.done b { background: var(--chip); border-color: var(--chip); color: var(--text); }
+    .side-quote { font-family: "Bricolage Grotesque", sans-serif; font-size: 28px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+    .content { padding: 56px 56px 32px; max-width: 760px; overflow: visible; }
+    .screen > .blob, .screen > .progress, .hero-mascot { display: none; }
+    .pkgs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .foot { position: static; flex-direction: row; justify-content: flex-end; }
+    .foot .btn-block { width: auto; min-width: 260px; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side" aria-label="Voortgang">
+    <div class="side-top">
+      <a class="logo" href="/"><img src="/static/img/mascotte-128.png" alt="" width="38" height="38">StudieBuddy</a>
+      <button class="icon-btn theme-toggle" type="button" data-theme-toggle>
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+    <img class="side-mascot" src="/static/img/mascotte-512.png" alt="" width="220" height="220">
+    <ol class="steps" id="steps">
+      <li data-step="1"><b>1</b>School en richting</li>
+      <li data-step="2"><b>2</b>Pakket kiezen</li>
+      <li data-step="3"><b>3</b>Afwerken</li>
+    </ol>
+    <p class="side-quote">Je klasgenoten zetten je vakken klaar. Jij helpt de volgende.</p>
+  </aside>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+    <header class="topbar">
+      <a class="logo" href="/"><img src="/static/img/mascotte-128.png" alt="" width="38" height="38">StudieBuddy</a>
+      <button class="icon-btn theme-toggle" type="button" data-theme-toggle>
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </header>
+
+    <main class="content">
+
+      <!-- 1. School en richting -->
+      <section class="screen" id="scr-start" aria-labelledby="t-start">
+        <img class="hero-mascot" src="/static/img/mascotte-512.png" alt="" width="128" height="128">
+        <div class="progress" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
+        <div class="head">
+          <span class="sticker" style="align-self: flex-start; background: var(--inv-bg); color: var(--inv-text);">Hey nieuwkomer!</span>
+          <h1 id="t-start">Waar studeer je?</h1>
+          <p class="muted">We checken of je klasgenoten je vakken al hebben klaargezet.</p>
+        </div>
+        <div id="hervat"></div>
+        <form id="form-start" class="stack" novalidate autocomplete="off">
+          <div class="field">
+            <label for="in-school">School</label>
+            <input class="input" id="in-school" name="school" placeholder="AP Hogeschool Antwerpen" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg-school">
+            <ul class="sugg" id="sugg-school" role="listbox" aria-label="Scholen" hidden></ul>
+          </div>
+          <div class="field">
+            <label for="in-richting">Richting</label>
+            <input class="input" id="in-richting" name="richting" placeholder="Toegepaste Informatica" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg-richting">
+            <ul class="sugg" id="sugg-richting" role="listbox" aria-label="Richtingen" hidden></ul>
+          </div>
+          <div id="found" aria-live="polite"></div>
+          <p class="error" id="err-start" role="alert" hidden></p>
+          <div class="foot">
+            <button class="btn btn-inv btn-block" type="submit" id="btn-start">
+              <span>Verder</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 2. Pakket kiezen -->
+      <section class="screen" id="scr-kies" aria-labelledby="t-kies" hidden>
+        <div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span></span></div>
+        <button class="link-btn back" type="button" data-terug="start">← Terug</button>
+        <div class="head">
+          <h1 id="t-kies" tabindex="-1">Kies je pakket</h1>
+          <p class="muted" data-veld="richting-sub"></p>
+        </div>
+        <div class="stack" style="gap: 8px;">
+          <span class="rowlab" id="lab-jaren">Academiejaar</span>
+          <div class="chips" id="jaren" role="group" aria-labelledby="lab-jaren"></div>
+        </div>
+        <div class="stack" style="gap: 8px;">
+          <span class="rowlab" id="lab-fases">Jaar (trajectschijf)</span>
+          <div class="chips" id="fases" role="group" aria-labelledby="lab-fases"></div>
+        </div>
+        <fieldset style="border: 0; margin: 0; padding: 0;">
+          <legend class="rowlab" style="padding: 0; margin-bottom: 8px;">Afstudeerrichting</legend>
+          <div class="pkgs" id="pkgs"></div>
+        </fieldset>
+        <button class="pkg-new" type="button" id="btn-naar-nieuw">
+          <span class="tile" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+          <span style="display: flex; flex-direction: column;"><span style="font-weight: 700;">Mijn pakket staat er niet tussen</span><span class="muted small">Maak er zelf één aan</span></span>
+        </button>
+        <div class="foot">
+          <button class="btn btn-groen btn-block" type="button" id="btn-kies">
+            <span>Neem dit pakket</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- 3a. Nieuw pakket -->
+      <section class="screen" id="scr-nieuw" aria-labelledby="t-nieuw" hidden>
+        <div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+        <button class="link-btn back" type="button" data-terug="vorige">← Terug</button>
+        <div class="head">
+          <h1 id="t-nieuw" tabindex="-1">Bouw je eigen pakket</h1>
+          <p class="muted" data-veld="richting-sub"></p>
+        </div>
+        <form id="form-nieuw" class="stack" style="gap: 26px;" novalidate>
+          <div class="stack">
+            <div class="step-h"><span>1</span>Welk jaar?</div>
+            <div class="grid-2">
+              <label class="boxsel"><span>Academiejaar</span><select id="in-ajaar"></select></label>
+              <label class="boxsel"><span>Jaar</span><select id="in-fase"></select></label>
+            </div>
+            <div class="field">
+              <label for="in-afst">Afstudeerrichting <span style="font-weight: 400;">(leeg = gemeenschappelijk jaar)</span></label>
+              <input class="input" id="in-afst" list="afst-lijst" placeholder="Artificiële Intelligentie">
+              <datalist id="afst-lijst"></datalist>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="step-h"><span>2</span>Jouw vakken</div>
+            <div class="stack" id="nieuw-vakken" aria-live="polite"></div>
+            <div class="vakform">
+              <div class="field">
+                <label for="in-vak">Nieuw vak</label>
+                <input class="input" id="in-vak" placeholder="Naam van het vak, bv. Machine Learning">
+              </div>
+              <div class="grid-3">
+                <label class="boxsel"><span>Semester</span><select id="in-vak-sem"></select></label>
+                <label class="boxsel"><span>Studiepunten</span><input id="in-vak-sp" type="number" min="1" max="60" step="1" value="6" inputmode="numeric"></label>
+                <label class="boxsel"><span>Soort</span><select id="in-vak-soort">
+                  <option value="verplicht">Verplicht</option>
+                  <option value="keuze">Keuzevak</option>
+                  <option value="optie">Deel van een optie</option>
+                </select></label>
+              </div>
+              <div class="field" id="optie-veld" hidden>
+                <label for="in-vak-optie">Naam van de optie</label>
+                <input class="input" id="in-vak-optie" list="optie-lijst" placeholder="Startup">
+                <datalist id="optie-lijst"></datalist>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-vak" style="align-self: flex-start;">+ Vak toevoegen</button>
+            </div>
+            <div class="stack" id="groep-instellingen"></div>
+          </div>
+          <div class="stack">
+            <div class="step-h"><span>3</span>ECTS-fiches</div>
+            <label class="drop" id="drop">
+              <input type="file" id="in-pdf" accept="application/pdf,.pdf" multiple class="sr-only">
+              <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
+              <span style="display: flex; flex-direction: column;"><span style="font-weight: 700;">Sleep je PDF's hierheen</span><span class="muted small">of klik om te kiezen · max. 4 MB per bestand</span></span>
+            </label>
+            <div class="stack" id="files" style="gap: 8px;"></div>
+          </div>
+          <div class="stack">
+            <div class="step-h"><span>4</span>Wie mag het zien?</div>
+            <div class="seg" role="radiogroup" aria-label="Zichtbaarheid">
+              <label><input type="radio" name="zicht" value="prive" class="sr-only">Alleen ik</label>
+              <label><input type="radio" name="zicht" value="publiek" class="sr-only" checked>Iedereen</label>
+            </div>
+            <p class="muted small" id="zicht-uitleg"></p>
+          </div>
+          <p class="error" id="err-nieuw" role="alert" hidden></p>
+          <div class="foot">
+            <button class="btn btn-groen btn-block" type="submit" id="btn-nieuw">Pakket indienen</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 3b. Pakket aanpassen -->
+      <section class="screen" id="scr-aanpassen" aria-labelledby="t-aanpassen" hidden>
+        <div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+        <button class="link-btn back" type="button" data-terug="kies">← Terug</button>
+        <div class="head">
+          <h1 id="t-aanpassen" tabindex="-1">Maak het van jou</h1>
+          <p class="muted" id="aanpassen-sub"></p>
+        </div>
+        <div class="sp-sum" id="sp-sum" aria-live="polite"></div>
+        <div class="stack" id="vakken" style="gap: 22px;"></div>
+        <div class="addrow dashed">
+          <label for="in-eigen" class="sr-only">Eigen vak toevoegen</label>
+          <input id="in-eigen" placeholder="+ Eigen vak toevoegen">
+          <label for="in-eigen-sp" class="sr-only">Studiepunten van je eigen vak</label>
+          <input id="in-eigen-sp" class="mini-sp" type="number" min="0" max="60" step="1" value="3" inputmode="numeric" title="Studiepunten">
+          <label for="in-eigen-sem" class="sr-only">Semester van je eigen vak</label>
+          <select id="in-eigen-sem" class="mini-sel"></select>
+          <button class="addbtn" type="button" id="btn-eigen" aria-label="Eigen vak toevoegen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+        <div class="voorstel">
+          <div class="voorstel-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+            <div class="stack" style="gap: 4px;">
+              <strong>Klopt het pakket zelf niet meer?</strong>
+              <span class="muted small">Stel een fix voor voor iedereen, bv. een vak dat verdwenen is. Een moderator checkt het eerst.</span>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-voorstel-open" aria-expanded="false" aria-controls="voorstel-form" style="align-self: flex-start;">Wijziging voorstellen</button>
+          <form id="voorstel-form" class="stack" hidden novalidate>
+            <label for="in-voorstel" class="sr-only">Wat moet er veranderen?</label>
+            <textarea class="input" id="in-voorstel" placeholder="Bv. 'Webdesign heet nu Web Development 1'"></textarea>
+            <p class="error" id="err-voorstel" role="alert" hidden></p>
+            <button class="btn btn-inv btn-sm" type="submit" style="align-self: flex-start;">Voorstel versturen</button>
+          </form>
+        </div>
+        <div class="foot">
+          <button class="btn btn-groen btn-block" type="button" id="btn-opslaan">Klaar, naar StudieBuddy</button>
+        </div>
+      </section>
+
+      <!-- 4. In controle -->
+      <section class="screen" id="scr-status" aria-labelledby="t-status" hidden>
+        <div class="illus" aria-hidden="true">
+          <div class="c1"></div>
+          <div class="c2"><i></i><i style="width: 90%"></i><i style="width: 80%"></i><i style="width: 60%"></i></div>
+          <div class="stamp">IN CONTROLE</div>
+          <div class="dotx"></div>
+        </div>
+        <div class="head">
+          <h1 id="t-status" tabindex="-1">Bedankt! Even checken…</h1>
+          <p class="muted">Een moderator kijkt je pakket na, zodat er geen lege of dubbele pakketten online komen.</p>
+        </div>
+        <div class="timeline" aria-label="Status">
+          <div class="st done"><span class="bol" aria-hidden="true">✓</span>Ingediend</div>
+          <div class="ln on" aria-hidden="true"></div>
+          <div class="st now"><span class="bol" aria-hidden="true"></span>In controle</div>
+          <div class="ln" aria-hidden="true"></div>
+          <div class="st todo"><span class="bol" aria-hidden="true"></span>Online</div>
+        </div>
+        <p class="note">Je kan je pakket nu al gebruiken. Tot het goedgekeurd is, ziet alleen jij het.</p>
+        <div class="foot">
+          <a class="btn btn-groen btn-block" href="/">Naar StudieBuddy</a>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script src="/static/js/theme.js"></script>
+<script src="/static/js/data.js"></script>
+<script src="/static/js/onboarding.js"></script>
+</body>
+</html>

@@ -1,3 +1,8 @@
 .env
 __pycache__/
 verbruik.json
+data_store.json
+data_store.tmp
+data_store.json.tmp
+uploads/
+.vercel/

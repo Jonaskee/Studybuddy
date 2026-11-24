@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="nl" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Moderatie – inloggen</title>
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("sb-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/static/css/studybuddy.css">
+<style>
+  main { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 20px; }
+  .kaart { width: 100%; max-width: 420px; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+  .kaart img { width: 96px; height: 96px; align-self: center; }
+  h1 { font-size: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <form class="card kaart anim-in" method="post" action="/moderatie">
+    <img src="/static/img/mascotte-128.png" alt="" width="96" height="96">
+    <h1>Moderatie</h1>
+    <p class="muted" style="text-align: center;">Alleen voor moderators. Meld je aan met je moderatoraccount of de moderatorcode.</p>
+    <div class="field">
+      <label for="gebruiker">Gebruikersnaam of moderatorcode</label>
+      <input class="input" id="gebruiker" name="gebruiker" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="wachtwoord">Wachtwoord <span style="font-weight: 400;">(niet nodig bij een moderatorcode)</span></label>
+      <input class="input" id="wachtwoord" name="wachtwoord" type="password" autocomplete="current-password">
+    </div>
+    <p class="error" id="fout" role="alert" hidden>Dat klopt niet. Probeer opnieuw.</p>
+    <button class="btn btn-groen btn-block" type="submit">Inloggen</button>
+    <a class="link-btn" href="/" style="align-self: center;">Terug naar StudieBuddy</a>
+  </form>
+</main>
+<script>
+  if (new URLSearchParams(location.search).has("fout")) document.getElementById("fout").hidden = false;
+</script>
+</body>
+</html>
