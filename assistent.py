@@ -3,7 +3,8 @@ StudieBuddy - een simpele AI-assistent met eigen context (PoC).
 
 Context die we zelf toevoegen:
   1. Rol                     -> hoe de assistent zich gedraagt
-  2. Kennis                  -> context/<vak>/*.md (ECTS-fiches)
+  2. Kennis                  -> ECTS-fiches uit Supabase (tabel vakken, zie supabase/schema.sql),
+                                met context/<vak>/*.md als reserve als Supabase niet bereikbaar is
   3. Tijd / locatie          -> huidige dag, uur, semester en locatie
   4. Sessiegegevens          -> sessie-id, starttijd en aantal vragen van deze sessie
 
@@ -27,24 +28,35 @@ MODEL = "z-ai/glm-5.3-flash"  # goedkoopste model op route33
 PRIJS_IN, PRIJS_UIT = 0.05, 0.20  # euro per 1M tokens (route33 pricing)
 
 
-def _budget_uit_env():
-    """DAG_BUDGET in euro's; 0 of leeg betekent geen limiet."""
-    ruw = (os.getenv("DAG_BUDGET") or "").strip()
+MAX_ANTWOORD_TOKENS = 600  # begrenst de kost per antwoord, ook als iemand om een "heel lang antwoord" vraagt
+
+MAP = Path(__file__).parent
+load_dotenv(MAP / ".env")
+
+
+def _euro_uit_env(naam, standaard):
+    """Bedrag in euro uit .env; 0 betekent geen limiet."""
+    ruw = (os.getenv(naam) or "").strip()
     if not ruw:
-        return 1.00
+        return standaard
     try:
-        return max(0.0, float(ruw))
+        waarde = float(ruw)
     except ValueError:
-        return 1.00
+        raise SystemExit(f"{naam} in .env moet een getal zijn, bv. {naam}={standaard:.2f}")
+    if not 0 <= waarde < float("inf"):  # vangt ook nan en inf, die de limiet anders stil uitschakelen
+        raise SystemExit(f"{naam} in .env moet een getal van 0 of meer zijn, bv. {naam}={standaard:.2f}")
+    return waarde
 
 
-BUDGET = _budget_uit_env()  # euro; daarboven stuurt StudieBuddy geen oproepen meer
+BUDGET = _euro_uit_env("TOTAAL_BUDGET", 1.00)    # euro in totaal; daarboven stuurt StudieBuddy geen oproepen meer (0 = geen limiet)
+DAG_BUDGET = _euro_uit_env("DAG_BUDGET", 0.10)  # euro per dag, zodat één spammer niet in één dag alles opmaakt (0 = geen limiet)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()  # publishable/anon key: RLS laat enkel publieke, goedgekeurde vakken zien
 LOCATIE = "Campus, België"
 
 # Meerdere requests kunnen tegelijk verbruik.json lezen/schrijven.
 verbruik_slot = threading.RLock()
 
-MAP = Path(__file__).parent
 CONTEXT_MAP = MAP / "context"
 # Op Vercel is de projectmap read-only, enkel /tmp is schrijfbaar.
 # shortcut: /tmp wordt gewist bij elke koude start, dus het budget telt op Vercel niet betrouwbaar; zet ook een limiet in het route33-dashboard
@@ -65,6 +77,22 @@ sessie = {
 
 
 def laad_vakken():
+    """Vaknaam -> ECTS-fiche. Uit Supabase; lukt dat niet, dan uit de map context/."""
+    if SUPABASE_URL and SUPABASE_KEY:
+        # shortcut: haalt alle publieke, goedgekeurde vakken op (RLS); later filteren op het pakket van de student
+        try:
+            r = httpx.get(f"{SUPABASE_URL}/rest/v1/vakken", headers={"apikey": SUPABASE_KEY},
+                          params={"select": "naam,fiche_md", "order": "naam"}, timeout=10)
+            r.raise_for_status()
+            vakken = {v["naam"]: v["fiche_md"] or "" for v in r.json()}
+            if vakken:
+                return vakken
+        except httpx.HTTPError:
+            pass  # val terug op de lokale fiches
+    return laad_vakken_lokaal()
+
+
+def laad_vakken_lokaal():
     """Elke submap van context/ is een vak, met de ECTS-fiche(s) als .md erin."""
     vakken = {}
     for vak_map in sorted(CONTEXT_MAP.iterdir()):
@@ -144,15 +172,23 @@ def kost(usage):
     return (usage["prompt_tokens"] * PRIJS_IN + usage["completion_tokens"] * PRIJS_UIT) / 1_000_000
 
 
+def vandaag_verbruikt(verbruik):
+    vandaag = datetime.now().strftime("%d/%m/%Y")
+    return sum(b["euro"] for b in verbruik.get("berichten", []) if b.get("tijd", "").startswith(vandaag))
+
+
 def vraag_ai(client, vraag, systeem, context_aan, browser=None):
-    # shortcut: telt enkel oproepen van StudieBuddy zelf, niet ander gebruik van dezelfde key
+    # shortcut: telt enkel oproepen van StudieBuddy zelf, niet ander gebruik van dezelfde key; zet ook een limiet in het route33-dashboard
     with verbruik_slot:
         verbruik = laad_verbruik()
-        if BUDGET and verbruik["euro"] >= BUDGET:
-            return f"[Budget op] StudieBuddy heeft al €{verbruik['euro']:.4f} van de €{BUDGET:.2f} verbruikt."
+    if BUDGET and verbruik["euro"] >= BUDGET:
+        return f"[Budget op] StudieBuddy heeft al €{verbruik['euro']:.4f} van de €{BUDGET:.2f} verbruikt."
+    if DAG_BUDGET and vandaag_verbruikt(verbruik) >= DAG_BUDGET:
+        return f"[Daglimiet] Het budget van €{DAG_BUDGET:.2f} voor vandaag is op. Morgen kan je weer vragen stellen."
 
     r = client.post("/chat/completions", json={
         "model": MODEL,
+        "max_tokens": MAX_ANTWOORD_TOKENS,
         "messages": [
             {"role": "system", "content": systeem},
             {"role": "user", "content": vraag},
