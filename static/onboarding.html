@@ -43,7 +43,7 @@
   @media (min-width: 960px) { #scr-start .head { padding-right: 0; } }
 
   /* suggesties */
-  .sugg { list-style: none; margin: 6px 0 0; padding: 0; border-radius: var(--radius); background: var(--card); border: 2px solid var(--line); overflow: hidden; }
+  .sugg { list-style: none; margin: 6px 0 0; padding: 0; border-radius: var(--radius); background: var(--card); border: 2px solid var(--line); overflow: hidden auto; max-height: 300px; }
   .sugg button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 13px 16px; border: 0; background: transparent; text-align: left; cursor: pointer; font-size: 15px; }
   .sugg li + li button { border-top: 1px solid var(--line); }
   .sugg button:hover, .sugg button:focus-visible { background: var(--hl); outline: none; }
@@ -138,13 +138,14 @@
   .drop:focus-within { outline: 3px solid var(--groen-line); outline-offset: 2px; }
   .drop .ico { width: 48px; height: 48px; border-radius: 14px; background: var(--groen); color: var(--on-groen); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .drop .ico svg { width: 24px; height: 24px; }
-  .file { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 14px; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--ring); }
-  .file .nm { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; font-size: 18px; color: var(--muted); }
-  .file button:hover { background: var(--hl); }
-  .file .nm small { display: block; font-weight: 400; font-size: 12px; }
-  .file .file-vak { flex: 0 1 45%; min-width: 0; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--ring); background: var(--card); color: var(--text); font: inherit; font-size: 13px; }
-  .file.los { box-shadow: 0 0 0 2px #e0a100; }
+  /* vakrij in "nieuw pakket": naam, semester, studiepunten en fiche meteen aanpasbaar */
+  .vrow { flex-wrap: wrap; }
+  .vrow .mini-sel, .vrow .mini-sp { height: 36px; }
+  .vrow .nrow-sp { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .vrow button.fiche-btn { width: auto; padding: 0 10px; font-size: 12px; font-weight: 700; background: var(--chip); color: var(--chip-text); }
+  .vrow button.fiche-btn.heeft { background: var(--groen); color: var(--on-groen); }
+  .vrow.nakijken { box-shadow: 0 0 0 2px #e0a100; }
+  @media (max-width: 560px) { .vrow .nm { flex-basis: 100%; } }
 
   .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; border-radius: 18px; background: var(--card); box-shadow: 0 0 0 1px var(--ring); }
   .seg label { height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--muted); cursor: pointer; }
@@ -255,7 +256,7 @@
         <form id="form-start" class="stack" novalidate autocomplete="off">
           <div class="field">
             <label for="in-school">School</label>
-            <input class="input" id="in-school" name="school" placeholder="AP Hogeschool Antwerpen" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg-school">
+            <input class="input" id="in-school" name="school" placeholder="Kies of typ je hogeschool" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg-school">
             <ul class="sugg" id="sugg-school" role="listbox" aria-label="Scholen" hidden></ul>
           </div>
           <div class="field">
@@ -329,10 +330,17 @@
           </div>
           <div class="stack">
             <div class="step-h"><span>2</span>Jouw vakken</div>
+            <label class="drop" id="drop">
+              <input type="file" id="in-pdf" accept="application/pdf,.pdf" multiple class="sr-only">
+              <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
+              <span style="display: flex; flex-direction: column;"><span style="font-weight: 700;">Sleep je ECTS-fiches hierheen</span><span class="muted small">Per fiche maken we een vak en lezen we de studiepunten en het semester uit · PDF, max. 4 MB</span></span>
+            </label>
+            <input type="file" id="in-pdf-vak" accept="application/pdf,.pdf" class="sr-only" tabindex="-1" aria-hidden="true">
+            <p class="muted small" id="upload-status" aria-live="polite" hidden></p>
             <div class="stack" id="nieuw-vakken" aria-live="polite"></div>
             <div class="vakform">
               <div class="field">
-                <label for="in-vak">Nieuw vak</label>
+                <label for="in-vak">Of typ een vak zonder fiche</label>
                 <input class="input" id="in-vak" placeholder="Naam van het vak, bv. Machine Learning">
               </div>
               <div class="grid-3">
@@ -354,16 +362,7 @@
             <div class="stack" id="groep-instellingen"></div>
           </div>
           <div class="stack">
-            <div class="step-h"><span>3</span>ECTS-fiches</div>
-            <label class="drop" id="drop">
-              <input type="file" id="in-pdf" accept="application/pdf,.pdf" multiple class="sr-only">
-              <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
-              <span style="display: flex; flex-direction: column;"><span style="font-weight: 700;">Sleep je PDF's hierheen</span><span class="muted small">of klik om te kiezen · max. 4 MB per bestand</span></span>
-            </label>
-            <div class="stack" id="files" style="gap: 8px;"></div>
-          </div>
-          <div class="stack">
-            <div class="step-h"><span>4</span>Wie mag het zien?</div>
+            <div class="step-h"><span>3</span>Wie mag het zien?</div>
             <div class="seg" role="radiogroup" aria-label="Zichtbaarheid">
               <label><input type="radio" name="zicht" value="prive" class="sr-only">Alleen ik</label>
               <label><input type="radio" name="zicht" value="publiek" class="sr-only" checked>Iedereen</label>

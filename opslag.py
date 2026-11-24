@@ -537,6 +537,23 @@ def handtekening(tekst: str) -> str:
     return hmac.new(_FICHE_GEHEIM, tekst.encode(), hashlib.sha256).hexdigest()
 
 
+def fiche_gegevens(tekst):
+    """Vaknaam, studiepunten en semester uit een ECTS-fiche, zodat de student ze niet zelf moet typen.
+    Wat niet gevonden wordt blijft None; de student kan alles nog aanpassen."""
+    t = (tekst or "")[:5000]
+    naam = (re.search(r"ects[- ]?fiche\s*[:\-]\s*(.+)", t, re.I)
+            or re.search(r"^\s*(?:naam\s+)?opleidingsonderdeel\s*:\s*(.+)", t, re.I | re.M))
+    sp = (re.search(r"\b(?:studieomvang|studiepunten|ects)\s*[:\-]?\s*(\d{1,2})\b", t, re.I)
+          or re.search(r"\b(\d{1,2})\s*(?:ects|studiepunt|sp\b)", t, re.I))
+    sp = int(sp.group(1)) if sp and 1 <= int(sp.group(1)) <= 60 else None
+    if re.search(r"jaarvak|semester\s*[:\-]?\s*(?:beide|jaar|1\s*(?:en|\+|&|of)\s*2)", t, re.I):
+        semester = "jaar"
+    else:
+        s = re.search(r"semester\s*[:\-]?\s*(?:semester\s*)?([12])\b", t, re.I)
+        semester = s.group(1) if s else None
+    return {"vak": naam.group(1).strip(" *:")[:MAX_NAAM] if naam else None, "sp": sp, "semester": semester}
+
+
 def bewaar_fiche(naam, inhoud):
     """PDF in Supabase Storage (of lokaal) bewaren + de tekst eruit halen voor de chat."""
     if len(inhoud) > MAX_FICHE_BYTES:
@@ -547,6 +564,7 @@ def bewaar_fiche(naam, inhoud):
     tekst = pdf_naar_tekst(inhoud)
     resultaat["tekst"] = tekst
     resultaat["handtekening"] = handtekening(tekst) if tekst else None
+    resultaat.update(fiche_gegevens(tekst))
     if not tekst:
         extra = "Uit deze PDF kon geen tekst gehaald worden (scan?); de chat kan hem niet lezen."
         resultaat["waarschuwing"] = (resultaat.get("waarschuwing", "") + " " + extra).strip()
@@ -653,11 +671,35 @@ def checks_voor(rij):
 # zoeken
 # ---------------------------------------------------------------------------
 
+# Alle hogescholen in Vlaanderen, ook zonder pakket. Een school komt pas in de databank bij het eerste pakket.
+# (naam, extra zoekwoorden: afkortingen, oude namen, campussteden)
+HOGESCHOLEN = [
+    ("AP Hogeschool Antwerpen", "artesis plantijn"),
+    ("Arteveldehogeschool", "artevelde gent"),
+    ("Erasmushogeschool Brussel", "ehb"),
+    ("HOGENT", "hogeschool gent"),
+    ("Hogeschool PXL", "pxl hasselt"),
+    ("Hogere Zeevaartschool Antwerpen", "hzs"),
+    ("Howest", "hogeschool west-vlaanderen kortrijk brugge"),
+    ("Karel de Grote Hogeschool", "kdg antwerpen"),
+    ("LUCA School of Arts", "luca kunst"),
+    ("Odisee", "brussel aalst gent sint-niklaas"),
+    ("Thomas More", "mechelen geel turnhout lier antwerpen"),
+    ("UCLL", "uc leuven-limburg hogeschool"),
+    ("VIVES", "kortrijk brugge roeselare oostende"),
+]
+
+
 def zoek_scholen(q):
     q = norm(q)
     winkel = huidige_opslag()
-    return [{"id": s["id"], "naam": s["naam"]}
-            for s in winkel.scholen() if q in norm(s["naam"])][:6]
+    namen = {norm(s["naam"]): s["naam"] for s in winkel.scholen()}
+    extra = {}
+    for naam, woorden in HOGESCHOLEN:
+        namen.setdefault(norm(naam), naam)
+        extra[norm(naam)] = woorden
+    treffers = sorted(k for k in namen if q in k or q in extra.get(k, ""))
+    return [{"naam": namen[k]} for k in treffers][:20]
 
 
 def _vind_school(naam):

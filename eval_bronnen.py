@@ -52,8 +52,20 @@ def test_opschonen():
     assert tekst == "Het telt 3 studiepunten [B8]. Het is in semester 1."
 
 
+def test_fiche_gegevens():
+    """Naam, studiepunten en semester komen uit de PDF-tekst van een ECTS-fiche."""
+    import opslag
+    tekst = ("ECTS-fiche: AI for Business\nArtesis Plantijn Hogeschool Antwerpen\nOpleidingscode: 39703/3670/2627/1/49\n"
+             "Opleiding: Bachelor in de toegepaste informatica, trajectschijf 3\n"
+             "Studieomvang: 6 ECTS (studiepunten)\nSemester: Semester 1\nGrensdatum leerkrediet: 01.12.2026 (1ste semester)")
+    assert opslag.fiche_gegevens(tekst) == {"vak": "AI for Business", "sp": 6, "semester": "1"}, opslag.fiche_gegevens(tekst)
+    assert opslag.fiche_gegevens("Opleidingsonderdeel: Stage\n27 studiepunten\njaarvak") == {"vak": "Stage", "sp": 27, "semester": "jaar"}
+    assert opslag.fiche_gegevens("") == {"vak": None, "sp": None, "semester": None}
+
+
 def main(met_ai):
     test_opschonen()
+    test_fiche_gegevens()
     vakken = assistent.laad_vakken()
     client = assistent.maak_client() if met_ai else None
     gevonden = juist = bron_ok = 0
