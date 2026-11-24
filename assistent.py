@@ -29,7 +29,9 @@ LOCATIE = "Campus, België"
 
 MAP = Path(__file__).parent
 CONTEXT_MAP = MAP / "context"
-VERBRUIK_BESTAND = MAP / "verbruik.json"
+# Op Vercel is de projectmap read-only, enkel /tmp is schrijfbaar.
+# shortcut: /tmp wordt gewist bij elke koude start, dus het budget telt op Vercel niet betrouwbaar; zet ook een limiet in het route33-dashboard
+VERBRUIK_BESTAND = Path("/tmp/verbruik.json") if os.getenv("VERCEL") else MAP / "verbruik.json"
 PROMPT_BESTAND = MAP / "systeem_prompt.md"  # sjabloon van de system prompt
 
 INFO_VELDEN = ("Titularis", "Co-titularis(sen)", "Studieomvang", "Kalender", "Semester")
