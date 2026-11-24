@@ -1,12 +1,10 @@
 -- StudieBuddy – Supabase-schema
 --
--- Uitvoeren: Supabase-dashboard → SQL Editor → dit bestand plakken → Run.
--- De Flask-backend gebruikt de service_role-sleutel (SUPABASE_SERVER_SLEUTEL),
--- die RLS omzeilt. De browser krijgt die sleutel nooit te zien: alle data gaat
+-- Uitvoeren: Supabase-dashboard → SQL Editor → dit bestand plakken → Run,
+-- en daarna supabase/opslag_rls.sql (wie aan deze tabellen mag).
+-- De Flask-backend gebruikt de publieke key plus de geheime SUPABASE_SERVER_SLEUTEL
+-- in een header; de browser krijgt nooit een sleutel te zien: alle data gaat
 -- via /api/data/... in app.py/data_api.py.
---
--- Let op: gebruik NIET de anon-key in SUPABASE_KEY; met RLS aan en zonder
--- policies kan die niets lezen of schrijven.
 
 create table if not exists scholen (
   id text primary key,
@@ -63,21 +61,13 @@ create table if not exists wijzigingsvoorstellen (
 );
 create index if not exists voorstellen_status_idx on wijzigingsvoorstellen (status);
 
--- Alles dichtzetten voor de publieke (anon) sleutel. De backend gebruikt de
--- service_role-sleutel en blijft werken. Wil je later Supabase Auth gebruiken,
--- voeg dan per tabel policies toe in plaats van dit uit te zetten.
+-- Alles dichtzetten voor de publieke (anon) sleutel; supabase/opslag_rls.sql
+-- laat enkel de backend (met de serversleutel in de header) erbij.
 alter table scholen enable row level security;
 alter table richtingen enable row level security;
 alter table pakketten enable row level security;
 alter table persoonlijke_pakketten enable row level security;
 alter table wijzigingsvoorstellen enable row level security;
-
--- Optioneel: de Storage-bucket voor ECTS-fiches. Maak hem ook aan via
--- Storage → New bucket (naam: ects-fiches, Private). Zonder bucket blijft de
--- app werken, maar worden PDF's niet bewaard.
-insert into storage.buckets (id, name, public)
-values ('ects-fiches', 'ects-fiches', false)
-on conflict (id) do nothing;
 
 -- De voorbeelddata wordt automatisch geplaatst bij de eerste data-aanvraag
 -- (tenzij SEED_DEMO=0). Handmatig terugzetten kan via /moderatie en
