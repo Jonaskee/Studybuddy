@@ -3,7 +3,7 @@ StudieBuddy - een simpele AI-assistent met eigen context (PoC).
 
 Context die we zelf toevoegen:
   1. Rol                     -> hoe de assistent zich gedraagt
-  2. Kennis                  -> context/<vak>/*.md (ECTS-fiches)
+  2. Kennis                  -> ECTS-fiches uit Supabase (tabel vakken, zie supabase/schema.sql)
   3. Tijd / locatie          -> huidige dag, uur, semester en locatie
   4. Sessiegegevens          -> sessie-id, starttijd en aantal vragen van deze sessie
 
@@ -14,6 +14,7 @@ Starten: python assistent.py
 
 import json
 import os
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -25,10 +26,19 @@ BASE_URL = "https://api.route33.ai/v1"
 MODEL = "z-ai/glm-5.3-flash"  # goedkoopste model op route33
 PRIJS_IN, PRIJS_UIT = 0.05, 0.20  # euro per 1M tokens (route33 pricing)
 BUDGET = 1.00  # euro; daarboven stuurt StudieBuddy geen oproepen meer
+MAX_ANTWOORD_TOKENS = 600  # begrenst de kost per antwoord, ook als iemand om een "heel lang antwoord" vraagt
 LOCATIE = "Campus, België"
 
 MAP = Path(__file__).parent
-CONTEXT_MAP = MAP / "context"
+load_dotenv(MAP / ".env")
+try:
+    DAG_BUDGET = float(os.getenv("DAG_BUDGET", "0.10"))  # euro per dag, zodat één spammer niet in één dag alles opmaakt
+except ValueError:
+    raise SystemExit("DAG_BUDGET in .env moet een getal zijn, bv. DAG_BUDGET=0.10")
+if not 0 <= DAG_BUDGET < float("inf"):  # vangt ook nan en inf, die de limiet anders stil uitschakelen
+    raise SystemExit("DAG_BUDGET in .env moet een getal van 0 of meer zijn, bv. DAG_BUDGET=0.10")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # publishable/anon key: RLS laat enkel publieke, goedgekeurde data zien
 # Op Vercel is de projectmap read-only, enkel /tmp is schrijfbaar.
 # shortcut: /tmp wordt gewist bij elke koude start, dus het budget telt op Vercel niet betrouwbaar; zet ook een limiet in het route33-dashboard
 VERBRUIK_BESTAND = Path("/tmp/verbruik.json") if os.getenv("VERCEL") else MAP / "verbruik.json"
@@ -48,13 +58,12 @@ sessie = {
 
 
 def laad_vakken():
-    """Elke submap van context/ is een vak, met de ECTS-fiche(s) als .md erin."""
-    vakken = {}
-    for vak_map in sorted(CONTEXT_MAP.iterdir()):
-        if vak_map.is_dir():
-            fiches = [p.read_text(encoding="utf-8") for p in sorted(vak_map.glob("*.md"))]
-            vakken[vak_map.name.replace("_", " ")] = "\n\n".join(fiches)
-    return vakken
+    """Vaknaam -> ECTS-fiche, uit Supabase."""
+    # shortcut: haalt alle publieke vakken op (er is nu één pakket); vanaf de onboarding (fase 1) filteren op het pakket van de student
+    r = httpx.get(f"{SUPABASE_URL}/rest/v1/vakken", headers={"apikey": SUPABASE_KEY},
+                  params={"select": "naam,fiche_md", "order": "naam"}, timeout=10)
+    r.raise_for_status()
+    return {v["naam"]: v["fiche_md"] or "" for v in r.json()}
 
 
 def overzicht(vakken):
@@ -67,10 +76,10 @@ def overzicht(vakken):
     return "\n\n".join(blokken)
 
 
-def relevante_vakken(vakken):
-    """Vakken die in de laatste 2 vragen genoemd worden (nieuwste vraag eerst)."""
+def relevante_vakken(vakken, vragen):
+    """Vakken die in de laatste 2 vragen van deze gebruiker genoemd worden (nieuwste vraag eerst)."""
     gevonden = []
-    for vraag in reversed(sessie["vragen"][-2:]):
+    for vraag in reversed(vragen[-2:]):
         for naam in vakken:
             woorden = [w for w in naam.lower().split() if len(w) > 3]
             if naam not in gevonden and any(w in vraag.lower() for w in woorden):
@@ -78,15 +87,17 @@ def relevante_vakken(vakken):
     return gevonden[:MAX_FICHES]
 
 
-def bouw_context(context_aan):
-    """Stelt de system prompt samen. Zonder context krijgt het model niets extra."""
+def bouw_context(context_aan, vragen=None):
+    """Stelt de system prompt samen. `vragen` = eerdere vragen van deze gebruiker (standaard de terminalsessie)."""
     if not context_aan:
         return "Je bent een behulpzame assistent."
+    if vragen is None:
+        vragen = sessie["vragen"]
 
     nu = datetime.now()
     semester = 1 if nu.month >= 9 or nu.month == 1 else 2
     vakken = laad_vakken()
-    fiches = "\n\n".join(vakken[naam] for naam in relevante_vakken(vakken)) or "(geen specifiek vak gevraagd)"
+    fiches = "\n\n".join(vakken[naam] for naam in relevante_vakken(vakken, vragen)) or "(geen specifiek vak gevraagd)"
 
     # De tekst staat in systeem_prompt.md; hier vullen we enkel de {velden} in.
     return PROMPT_BESTAND.read_text(encoding="utf-8").format(
@@ -97,17 +108,18 @@ def bouw_context(context_aan):
         locatie=LOCATIE,
         sessie_id=sessie["id"],
         sessie_start=f"{sessie['start']:%H:%M}",
-        aantal_vragen=len(sessie["vragen"]),
+        aantal_vragen=len(vragen),
         overzicht=overzicht(vakken),
         fiches=fiches,
     ).strip()
 
 
 def maak_client():
-    load_dotenv(MAP / ".env")
     api_key = os.getenv("R33_API_KEY")
     if not api_key or not api_key.startswith("sk-r33-"):
         raise SystemExit("Zet eerst je route33 API key (R33_API_KEY) in het .env bestand.")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SystemExit("Zet SUPABASE_URL en SUPABASE_KEY in het .env bestand.")
     return httpx.Client(base_url=BASE_URL, headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
 
 
@@ -122,14 +134,26 @@ def kost(usage):
     return (usage["prompt_tokens"] * PRIJS_IN + usage["completion_tokens"] * PRIJS_UIT) / 1_000_000
 
 
-def vraag_ai(client, vraag, systeem, context_aan):
-    # shortcut: telt enkel oproepen van StudieBuddy zelf, niet ander gebruik van dezelfde key
-    verbruik = laad_verbruik()
+def vandaag_verbruikt(verbruik):
+    vandaag = datetime.now().strftime("%d/%m/%Y")
+    return sum(b["euro"] for b in verbruik.get("berichten", []) if b["tijd"].startswith(vandaag))
+
+
+verbruik_slot = threading.Lock()  # gelijktijdige vragen mogen elkaars kost niet overschrijven
+
+
+def vraag_ai(client, vraag, systeem, context_aan, browser=None):
+    # shortcut: telt enkel oproepen van StudieBuddy zelf, niet ander gebruik van dezelfde key; zet ook een limiet in het route33-dashboard
+    with verbruik_slot:
+        verbruik = laad_verbruik()
     if verbruik["euro"] >= BUDGET:
         return f"[Budget op] StudieBuddy heeft al €{verbruik['euro']:.4f} van de €{BUDGET:.2f} verbruikt."
+    if vandaag_verbruikt(verbruik) >= DAG_BUDGET:
+        return f"[Daglimiet] Het budget van €{DAG_BUDGET:.2f} voor vandaag is op. Morgen kan je weer vragen stellen."
 
     r = client.post("/chat/completions", json={
         "model": MODEL,
+        "max_tokens": MAX_ANTWOORD_TOKENS,
         "messages": [
             {"role": "system", "content": systeem},
             {"role": "user", "content": vraag},
@@ -141,17 +165,20 @@ def vraag_ai(client, vraag, systeem, context_aan):
 
     usage = data["usage"]
     euro = kost(usage)
-    verbruik["euro"] += euro
-    verbruik.setdefault("berichten", []).append({
-        "tijd": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-        "vraag": vraag[:80],
-        "context": context_aan,
-        "tokens_in": usage["prompt_tokens"],
-        "tokens_uit": usage["completion_tokens"],
-        "euro": euro,
-    })
-    VERBRUIK_BESTAND.parent.mkdir(exist_ok=True)
-    VERBRUIK_BESTAND.write_text(json.dumps(verbruik, indent=2, ensure_ascii=False), encoding="utf-8")
+    with verbruik_slot:
+        verbruik = laad_verbruik()  # opnieuw lezen: een andere vraag kan intussen kost bijgeschreven hebben
+        verbruik["euro"] += euro
+        verbruik.setdefault("berichten", []).append({
+            "tijd": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "vraag": vraag[:80],
+            "context": context_aan,
+            "tokens_in": usage["prompt_tokens"],
+            "tokens_uit": usage["completion_tokens"],
+            "euro": euro,
+            "browser": browser,  # zodat de limiet per browser een herstart overleeft
+        })
+        VERBRUIK_BESTAND.parent.mkdir(exist_ok=True)
+        VERBRUIK_BESTAND.write_text(json.dumps(verbruik, indent=2, ensure_ascii=False), encoding="utf-8")
 
     return antwoord
 

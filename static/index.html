@@ -86,7 +86,7 @@
   <main>
     <div id="chat"></div>
     <form id="formulier">
-      <textarea id="invoer" rows="1" placeholder="Stel je vraag…" autofocus></textarea>
+      <textarea id="invoer" rows="1" placeholder="Stel je vraag…" maxlength="500" autofocus></textarea>
       <button id="verstuur" type="submit">Verstuur</button>
     </form>
   </main>
@@ -96,6 +96,20 @@
   const invoer = document.getElementById("invoer");
   const knop = document.getElementById("verstuur");
   const context = document.getElementById("context");
+  const OPSLAG = "studiebuddy_gesprek";  // gesprek blijft in deze browser bewaard, ook na een refresh
+  let maxVragen = 5;
+
+  function gesprek() {
+    try { return JSON.parse(localStorage.getItem(OPSLAG)) || []; } catch { return []; }
+  }
+
+  function bewaar(rol, tekst) {
+    localStorage.setItem(OPSLAG, JSON.stringify([...gesprek(), { rol, tekst }].slice(-50)));
+  }
+
+  function toonTeller(resterend) {
+    toonBericht("assistant", `[Nog ${resterend} van de ${maxVragen} vragen over]`, "typen");
+  }
 
   function toonBericht(rol, tekst, extraKlasse) {
     const div = document.createElement("div");
@@ -130,6 +144,7 @@
     if (!vraag || knop.disabled) return;
 
     toonBericht("user", vraag);
+    bewaar("user", vraag);
     invoer.value = "";
     invoer.style.height = "";
     knop.disabled = true;
@@ -141,10 +156,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vraag, context: context.checked }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ fout: `Fout ${res.status}: probeer later opnieuw.` }));
       typen.remove();
-      toonBericht("assistant", data.antwoord || data.fout || "Geen antwoord ontvangen.");
+      const tekst = data.antwoord || data.fout || "Geen antwoord ontvangen.";
+      toonBericht("assistant", tekst);
+      bewaar("assistant", tekst);
       if (data.vorige_vragen) toonGeschiedenis(data.vorige_vragen);
+      if (data.resterend !== undefined) toonTeller(data.resterend);
     } catch {
       typen.remove();
       toonBericht("assistant", "Kan de server niet bereiken.");
@@ -168,6 +186,17 @@
 
   toonGeschiedenis([]);
   toonBericht("assistant", "Hallo! Ik ben je StudieBuddy. Wat wil je weten?");
+  for (const b of gesprek()) toonBericht(b.rol === "user" ? "user" : "assistant", String(b.tekst));
+
+  // Teller en eigen vorige vragen ophalen, zodat een refresh niets lijkt te resetten.
+  fetch("/api/status")
+    .then((res) => res.json())
+    .then((data) => {
+      maxVragen = data.max_vragen;
+      toonGeschiedenis(data.vorige_vragen);
+      toonTeller(data.resterend);
+    })
+    .catch(() => {});
 </script>
 </body>
 </html>
