@@ -7,6 +7,8 @@ Context die we zelf toevoegen:
   3. Tijd / locatie          -> huidige dag, uur, semester en locatie
   4. Sessiegegevens          -> sessie-id, starttijd en aantal vragen van deze sessie
 
+De system prompt zelf staat in systeem_prompt.md; bouw_context() vult de {velden} in.
+
 Starten: python assistent.py
 """
 
@@ -28,6 +30,7 @@ LOCATIE = "Campus, België"
 MAP = Path(__file__).parent
 CONTEXT_MAP = MAP / "context"
 VERBRUIK_BESTAND = MAP / "verbruik.json"
+PROMPT_BESTAND = MAP / "systeem_prompt.md"  # sjabloon van de system prompt
 
 INFO_VELDEN = ("Titularis", "Co-titularis(sen)", "Studieomvang", "Kalender", "Semester")
 MAX_FICHES = 2  # alle fiches samen is veel tokens, dus veel kosten
@@ -83,26 +86,19 @@ def bouw_context(context_aan):
     vakken = laad_vakken()
     fiches = "\n\n".join(vakken[naam] for naam in relevante_vakken(vakken)) or "(geen specifiek vak gevraagd)"
 
-    return f"""## Rol
-Je bent StudieBuddy, een studieassistent voor een 3de-jaarsstudent.
-Antwoord kort (1 à 2 zinnen) in het Nederlands en enkel op basis van de info hieronder.
-Gebruik gewone tekst zonder opmaak (geen * of **), want het antwoord verschijnt in een terminal.
-
-## Tijd en locatie
-Vandaag is het {DAGEN[nu.weekday()]} {nu:%d/%m/%Y}, het is {nu:%H:%M}.
-We zitten in semester {semester}.
-Locatie: {LOCATIE}
-
-## Sessie
-Sessie-id: {sessie['id']}
-Gestart om: {sessie['start']:%H:%M}
-Aantal vragen deze sessie: {len(sessie['vragen'])}
-
-## Vakken van de student (overzicht)
-{overzicht(vakken)}
-
-## Volledige ECTS-fiche van het gevraagde vak
-{fiches}"""
+    # De tekst staat in systeem_prompt.md; hier vullen we enkel de {velden} in.
+    return PROMPT_BESTAND.read_text(encoding="utf-8").format(
+        dag=DAGEN[nu.weekday()],
+        datum=f"{nu:%d/%m/%Y}",
+        uur=f"{nu:%H:%M}",
+        semester=semester,
+        locatie=LOCATIE,
+        sessie_id=sessie["id"],
+        sessie_start=f"{sessie['start']:%H:%M}",
+        aantal_vragen=len(sessie["vragen"]),
+        overzicht=overzicht(vakken),
+        fiches=fiches,
+    ).strip()
 
 
 def maak_client():
