@@ -33,6 +33,7 @@ app.register_blueprint(data_bp)
 MAX_VRAAG_TEKENS = int(os.getenv("MAX_VRAAG_TEKENS", "500"))              # lange vragen = veel input-tokens
 MAX_VRAGEN_PER_BROWSER = int(os.getenv("MAX_VRAGEN_PER_BROWSER", "5"))    # 0 = onbeperkt (geteld in de database)
 MAX_VRAGEN_PER_MINUUT = int(os.getenv("MAX_VRAGEN_PER_MINUUT", "30"))     # hele site samen: op de hackathon één IP
+MAX_SAMENVATTINGEN, MAX_SAMENVATTING_TEKENS = 3, 4000  # per vraag; elke vraag stuurt ze mee, dus begrensd voor de kost
 MAX_LOGIN_FOUTEN = 30  # per IP-adres per kwartier, tegen wachtwoord raden (ruim, want gedeeld wifi)
 ONBEPERKT = 1_000_000  # wat "0 = onbeperkt" voor de databank betekent
 
@@ -136,6 +137,14 @@ def chat():
     if len(vraag) > MAX_VRAAG_TEKENS:
         return jsonify(fout=f"Je vraag is te lang (max. {MAX_VRAAG_TEKENS} tekens)."), 400
     context_aan = bool(gegevens.get("context", True))
+    # Eigen samenvattingen staan enkel in de browser (IndexedDB): de chat stuurt hun tekst mee.
+    ruw = gegevens.get("samenvattingen") if context_aan else None
+    samenvattingen = [
+        {"vak": "Jouw samenvatting", "nr": 0, "titel": str(s.get("naam") or "samenvatting")[:100],
+         "tekst": s["tekst"].strip()[:MAX_SAMENVATTING_TEKENS]}
+        for s in (ruw if isinstance(ruw, list) else [])
+        if isinstance(s, dict) and isinstance(s.get("tekst"), str) and s["tekst"].strip()
+    ][:MAX_SAMENVATTINGEN]
 
     # shortcut: wie cookies wist of een incognitovenster opent, krijgt opnieuw 5 vragen; de daglimiet blijft wel gelden
     browser = browser_id()
@@ -147,7 +156,8 @@ def chat():
 
     try:
         vakken = studiecontext(browser) if context_aan else None
-        tekst, resterend, eigen_vragen, bronnen = vraag_ai(client, vraag, context_aan, browser, max_per_browser(), vakken)
+        tekst, resterend, eigen_vragen, bronnen = vraag_ai(client, vraag, context_aan, browser, max_per_browser(), vakken,
+                                                            samenvattingen)
     except Limiet as fout:
         return met_cookie((jsonify(fout=str(fout)), 429), browser)
     except httpx.HTTPError as fout:  # route33 of Supabase onbereikbaar of fout; de vraag is dan al teruggegeven
@@ -156,6 +166,15 @@ def chat():
     return met_cookie(jsonify(antwoord=tekst, vorige_vragen=eigen_vragen[-5:],
                               resterend=resterend if MAX_VRAGEN_PER_BROWSER > 0 else None,
                               bronnen=bronnen if context_aan else None), browser)
+
+
+@app.post("/api/samenvatting-tekst")
+def samenvatting_tekst():
+    """Tekst uit een geüploade PDF-samenvatting; de browser bewaart die en stuurt ze mee met elke vraag."""
+    bestand = request.files.get("bestand")
+    if not bestand or not bestand.filename.lower().endswith(".pdf"):
+        return jsonify(fout="Enkel PDF-bestanden."), 400
+    return jsonify(tekst=opslag.pdf_naar_tekst(bestand.read()))
 
 
 @app.get("/api/status")

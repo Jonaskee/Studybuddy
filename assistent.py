@@ -273,10 +273,11 @@ def zoek_bronnen(vakken, vragen):
     return gekozen
 
 
-def bouw_context(context_aan, vragen=None, vakken=None):
+def bouw_context(context_aan, vragen=None, vakken=None, samenvattingen=()):
     """Stelt de system prompt samen. Geeft (prompt, labels) terug; labels = {"B1": bron, ...} voor de bronvermelding.
     `vragen` = eerdere vragen van deze gebruiker, de nieuwste laatst (standaard de terminalsessie).
-    `vakken` = de vakken van deze student (vakken_voor); standaard alle standaardfiches."""
+    `vakken` = de vakken van deze student (vakken_voor); standaard alle standaardfiches.
+    `samenvattingen` = secties met de eigen samenvattingen van de student; gaan altijd mee."""
     if not context_aan:
         return "Je bent een behulpzame assistent.", {}
     vragen = list(sessie["vragen"] if vragen is None else vragen)
@@ -284,7 +285,7 @@ def bouw_context(context_aan, vragen=None, vakken=None):
     nu = datetime.now(TIJDZONE)
     semester = 1 if nu.month >= 9 or nu.month == 1 else 2
     vakken = laad_vakken() if vakken is None else vakken
-    labels = {f"B{i}": s for i, s in enumerate([overzicht(vakken), *zoek_bronnen(vakken, vragen)], 1)}
+    labels = {f"B{i}": s for i, s in enumerate([overzicht(vakken), *zoek_bronnen(vakken, vragen), *samenvattingen], 1)}
     bronnen = "\n\n".join(f"[{label}] {s['vak']} — {s['titel']}\n{s['tekst']}" for label, s in labels.items())
 
     # De tekst staat in systeem_prompt.md; hier vullen we enkel de {velden} in.
@@ -347,7 +348,7 @@ def rpc(functie, **args):
     return r.json() if r.content else None
 
 
-def vraag_ai(client, vraag, context_aan, browser=None, max_per_browser=None, vakken=None):
+def vraag_ai(client, vraag, context_aan, browser=None, max_per_browser=None, vakken=None, samenvattingen=()):
     """Controleert de limieten in de database, stelt de vraag en boekt de kost.
     Geeft (antwoord, resterende vragen, eigen vragen, bronnen) terug, of gooit Limiet."""
     # shortcut: telt enkel oproepen van StudieBuddy zelf, niet ander gebruik van dezelfde key; zet ook een limiet in het route33-dashboard
@@ -362,7 +363,7 @@ def vraag_ai(client, vraag, context_aan, browser=None, max_per_browser=None, vak
 
     vragen = res["vragen"] if browser else sessie["vragen"]
     try:
-        systeem, labels = bouw_context(context_aan, vragen, vakken)
+        systeem, labels = bouw_context(context_aan, vragen, vakken, samenvattingen)
         r = client.post("/chat/completions", json={
             "model": MODEL,
             "max_tokens": MAX_ANTWOORD_TOKENS,

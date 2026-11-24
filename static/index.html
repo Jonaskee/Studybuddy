@@ -324,7 +324,7 @@
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vraag, context: context.checked }),
+        body: JSON.stringify({ vraag, context: context.checked, samenvattingen: context.checked ? await samenvattingTeksten() : [] }),
       });
       const data = await res.json().catch(() => ({ fout: `Fout ${res.status}: probeer later opnieuw.` }));
       typen.remove();
@@ -396,6 +396,30 @@
     const store = (await svDb).transaction("samenvattingen", modus).objectStore("samenvattingen");
     const req = actie(store);
     return new Promise((ok, nee) => { req.onsuccess = () => ok(req.result); req.onerror = () => nee(req.error); });
+  }
+  // De tekst van de (hoogstens 3 nieuwste) samenvattingen voor de chat; een PDF leest de server één keer uit.
+  async function samenvattingTeksten() {
+    let alle = [];
+    try { alle = await svDoe("readonly", (s) => s.getAll()); } catch { return []; }
+    const uit = [];
+    for (const sv of alle.slice(-3)) {
+      if (sv.tekst === undefined) {
+        try {
+          if (sv.naam.toLowerCase().endsWith(".pdf")) {
+            const form = new FormData();
+            form.append("bestand", sv.bestand, sv.naam);
+            const res = await fetch("/api/samenvatting-tekst", { method: "POST", body: form });
+            if (!res.ok) continue;
+            sv.tekst = (await res.json()).tekst || "";
+          } else {
+            sv.tekst = await sv.bestand.text();
+          }
+          await svDoe("readwrite", (s) => s.put(sv));  // volgende vraag niet opnieuw uitlezen
+        } catch { continue; }
+      }
+      if (sv.tekst) uit.push({ naam: sv.naam, tekst: sv.tekst.slice(0, 4000) });
+    }
+    return uit;
   }
   const svMelding = document.getElementById("sv-melding");
   const svBestand = document.getElementById("sv-bestand");
