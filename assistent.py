@@ -123,11 +123,12 @@ def relevante_vakken(vakken, vragen):
     return gevonden[:MAX_FICHES]
 
 
-def bouw_context(context_aan, vragen=None):
+def bouw_context(context_aan, vragen=None, eigen_fiches=None):
     """Stelt de system prompt samen. Zonder context krijgt het model niets extra.
 
     `vragen` is de vraaggeschiedenis van deze bezoeker (web) of None (terminal,
-    dan gebruiken we de globale sessie).
+    dan gebruiken we de globale sessie). `eigen_fiches` (vaknaam -> tekst) komt
+    uit de PDF's die de student zelf uploadde en wint van de standaardfiches.
     """
     if not context_aan:
         return "Je bent een behulpzame assistent."
@@ -136,6 +137,9 @@ def bouw_context(context_aan, vragen=None):
     nu = datetime.now()
     semester = 1 if nu.month >= 9 or nu.month == 1 else 2
     vakken = laad_vakken()
+    if eigen_fiches:
+        vakken = {**vakken, **{naam: f"## ECTS-fiche {naam} (geüploade PDF)\n\n{tekst}"
+                               for naam, tekst in eigen_fiches.items()}}
     fiches = "\n\n".join(vakken[naam] for naam in relevante_vakken(vakken, vragen)) or "(geen specifiek vak gevraagd)"
 
     # De tekst staat in systeem_prompt.md; hier vullen we enkel de {velden} in.

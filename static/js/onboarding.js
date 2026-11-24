@@ -339,6 +339,7 @@
     }
     state.nieuw.netToegevoegd = false;
     renderGroepInstellingen();
+    renderFiles();
     const opties = [...new Set(vakken.filter((v) => v.soort === "optie").map((v) => v.optie))];
     $("optie-lijst").innerHTML = opties.map((o) => `<option value="${esc(o)}"></option>`).join("");
   }
@@ -412,11 +413,35 @@
     if (geweigerd.length) toast("Niet toegevoegd (geen PDF of te groot): " + geweigerd.join(", "));
   }
 
+  // Bij welk vak hoort een PDF? Zelf gekozen (f.vak) of automatisch op bestandsnaam.
+  const sleutel = (s) => s.toLowerCase().replace(/\.pdf$/, "").replace(/^ects[_ -]?fiche[_ -]?/, "").replace(/[^a-z0-9]/g, "");
+  function raadVak(bestandsnaam) {
+    const b = sleutel(bestandsnaam);
+    if (!b) return null;
+    const v = state.nieuw.vakken.find((x) => { const n = sleutel(x.naam); return n && (b.includes(n) || n.includes(b)); });
+    return v ? v.naam : null;
+  }
+  function vakVoorFile(f) {
+    if (f.vak !== undefined && (f.vak === "" || state.nieuw.vakken.some((v) => v.naam === f.vak))) return f.vak || null;
+    return raadVak(f.name);
+  }
+
   function renderFiles() {
-    $("files").innerHTML = state.nieuw.files.map((f, i) => `<div class="file">
+    const vakken = state.nieuw.vakken;
+    $("files").innerHTML = state.nieuw.files.map((f, i) => {
+      const gekozen = vakVoorFile(f);
+      const opties = [`<option value="">${vakken.length ? "— kies het vak —" : "voeg eerst vakken toe"}</option>`]
+        .concat(vakken.map((v) => `<option value="${esc(v.naam)}"${v.naam === gekozen ? " selected" : ""}>${esc(v.naam)}</option>`)).join("");
+      return `<div class="file${gekozen ? "" : " los"}">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" style="color: var(--groen-text); flex-shrink: 0;"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>
-      <span class="nm">${esc(f.name)}</span><span class="muted small">${grootte(f.size)}</span>
-      <button type="button" data-i="${i}" aria-label="Verwijder ${esc(f.name)}">×</button></div>`).join("");
+      <span class="nm" title="${esc(f.name)}">${esc(f.name)}<small class="muted">${grootte(f.size)}</small></span>
+      <select class="file-vak" data-i="${i}" aria-label="Vak voor ${esc(f.name)}">${opties}</select>
+      <button type="button" data-i="${i}" aria-label="Verwijder ${esc(f.name)}">×</button></div>`;
+    }).join("");
+    $("files").querySelectorAll("select").forEach((sel) => sel.addEventListener("change", () => {
+      state.nieuw.files[Number(sel.dataset.i)].vak = sel.value;
+      renderFiles();
+    }));
     $("files").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
       state.nieuw.files.splice(Number(b.dataset.i), 1);
       renderFiles();
@@ -446,15 +471,27 @@
       $("in-vak").focus();
       return;
     }
+    const los = state.nieuw.files.filter((f) => !vakVoorFile(f));
+    if (los.length) {
+      fout("err-nieuw", "Kies bij elke PDF het vak waar hij bij hoort (of verwijder hem): " + los.map((f) => f.name).join(", "));
+      return;
+    }
+    const dubbel = state.nieuw.vakken.find((v) => state.nieuw.files.filter((f) => vakVoorFile(f) === v.naam).length > 1);
+    if (dubbel) {
+      fout("err-nieuw", `Er zijn meerdere PDF's gekoppeld aan "${dubbel.naam}". Kies er één per vak.`);
+      return;
+    }
     const knop = $("btn-nieuw");
     bezig(knop, true);
     try {
-      const fiches = await SB.uploadFiches(state.nieuw.files);
-      // Koppel een PDF aan een vak als de bestandsnaam op de vaknaam lijkt.
-      const sleutel = (s) => s.toLowerCase().replace(/\.pdf$/, "").replace(/[^a-z0-9]/g, "");
+      const teUploaden = state.nieuw.files;
+      const fiches = await SB.uploadFiches(teUploaden);
+      const waarschuwingen = fiches.filter((x) => x.waarschuwing).map((x) => `${x.naam}: ${x.waarschuwing}`);
+      if (waarschuwingen.length) toast(waarschuwingen.join(" · "));
       const groepen = [];
       const vakken = state.nieuw.vakken.map((v) => {
-        const f = fiches.find((x) => sleutel(x.naam).includes(sleutel(v.naam)) || sleutel(v.naam).includes(sleutel(x.naam)));
+        const i = teUploaden.findIndex((f) => vakVoorFile(f) === v.naam);
+        const f = i >= 0 ? fiches[i] : null;
         const groep = groepIdVoor(v);
         if (groep && !groepen.some((g) => g.id === groep)) {
           groepen.push({
@@ -463,7 +500,7 @@
           });
         }
         return { naam: v.naam, semester: v.semester, sp: v.sp,
-                 fiche: f ? { naam: f.naam, pad: f.pad || null } : null, groep, optie: v.optie };
+                 fiche: f ? { naam: f.naam, pad: f.pad || null, tekst: f.tekst || undefined } : null, groep, optie: v.optie };
       });
       const pakket = await SB.maakPakket({
         schoolNaam: state.school, richtingNaam: state.richting,

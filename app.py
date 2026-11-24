@@ -23,6 +23,7 @@ from collections import defaultdict, deque
 import httpx
 from flask import Flask, Response, jsonify, make_response, redirect, request, send_from_directory
 
+import opslag
 from assistent import api_fout, bouw_context, laad_verbruik, maak_client, verbruik_slot, vraag_ai
 from data_api import bp as data_bp
 from identiteit import (
@@ -156,7 +157,8 @@ def chat():
         eigen_vragen = geschiedenis[browser]
         eigen_vragen.append(vraag)
         try:
-            tekst = vraag_ai(client, vraag, bouw_context(context_aan, eigen_vragen), context_aan, browser)
+            eigen_fiches = opslag.fiche_teksten(browser) if context_aan else {}
+            tekst = vraag_ai(client, vraag, bouw_context(context_aan, eigen_vragen, eigen_fiches), context_aan, browser)
         except httpx.HTTPError as fout:
             # Mislukte oproep telt niet mee (ook verbindingsfouten en timeouts).
             with verbruik_slot:

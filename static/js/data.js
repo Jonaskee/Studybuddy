@@ -59,14 +59,19 @@ const SB = (() => {
 
     haalPakket: (id) => api("/pakket/" + encodeURIComponent(id)),
 
-    /** PDF's uploaden. Eén request per bestand (Vercel staat max. ~4,5 MB per request toe). → [{naam, pad}] */
+    /** PDF's uploaden. Eén request per bestand (Vercel staat max. ~4,5 MB per request toe). → [{naam, pad, tekst, waarschuwing}] */
     async uploadFiches(bestanden) {
       const uit = [];
       for (const bestand of Array.from(bestanden)) {
         const form = new FormData();
         form.append("bestand", bestand, bestand.name);
-        const fiche = await api("/fiches", { method: "POST", body: form });
-        uit.push({ naam: fiche.naam, grootte: bestand.size, pad: fiche.pad || null, waarschuwing: fiche.waarschuwing });
+        let fiche;
+        try {
+          fiche = await api("/fiches", { method: "POST", body: form });
+        } catch (fout) {
+          throw new Error(`Upload van "${bestand.name}" mislukt: ${fout.message}`);
+        }
+        uit.push({ naam: fiche.naam, grootte: bestand.size, pad: fiche.pad || null, tekst: fiche.tekst || "", waarschuwing: fiche.waarschuwing });
       }
       return uit;
     },

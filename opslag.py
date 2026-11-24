@@ -505,11 +505,65 @@ def huidige_opslag():
 # namen en checks
 # ---------------------------------------------------------------------------
 
+MAX_FICHE_TEKST = 40_000  # tekens; genoeg voor een ECTS-fiche, houdt pakketten klein
+
+
+def pdf_naar_tekst(inhoud: bytes) -> str:
+    """Tekst uit een PDF halen (pypdf). Lege string als het niet lukt (bv. een scan)."""
+    try:
+        from io import BytesIO
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        lezer = PdfReader(BytesIO(inhoud))
+        if lezer.is_encrypted:
+            lezer.decrypt("")
+        stukken = []
+        for pagina in lezer.pages[:30]:
+            stukken.append(pagina.extract_text() or "")
+            if sum(map(len, stukken)) > MAX_FICHE_TEKST:
+                break
+    except Exception:
+        return ""
+    tekst = "\n".join(stukken)
+    tekst = re.sub(r"[ \t]+", " ", tekst)
+    tekst = re.sub(r"\n\s*\n+", "\n\n", tekst).strip()
+    return tekst[:MAX_FICHE_TEKST]
+
+
 def bewaar_fiche(naam, inhoud):
-    """PDF in Supabase Storage (of lokaal) bewaren; naam + pad voor bij het vak."""
+    """PDF in Supabase Storage (of lokaal) bewaren + de tekst eruit halen voor de chat."""
     if len(inhoud) > MAX_FICHE_BYTES:
         raise ValidatieFout("Het bestand is te groot (max. 10 MB).")
-    return huidige_opslag().bewaar_fiche(naam, inhoud)
+    if not inhoud.lstrip()[:5].startswith(b"%PDF"):
+        raise ValidatieFout(f"'{Path(naam).name}' is geen geldige PDF.")
+    resultaat = huidige_opslag().bewaar_fiche(naam, inhoud)
+    tekst = pdf_naar_tekst(inhoud)
+    resultaat["tekst"] = tekst
+    if not tekst:
+        extra = "Uit deze PDF kon geen tekst gehaald worden (scan?); de chat kan hem niet lezen."
+        resultaat["waarschuwing"] = (resultaat.get("waarschuwing", "") + " " + extra).strip()
+    return resultaat
+
+
+def fiche_teksten(student_id):
+    """Vaknaam -> fichetekst voor de vakken die deze student volgt (uit geüploade PDF's).
+    Faalt nooit: zonder pakket of bij een opslagfout gewoon een lege dict."""
+    try:
+        volledig = haal_mijn_pakket_volledig(student_id)
+        if not volledig:
+            return {}
+        basis = huidige_opslag().pakket(volledig["mijn"]["basisPakketId"]) or {}
+        ruw = {v.get("naam"): v for v in basis.get("vakken") or []}
+        uit = {}
+        for v in volledig["vakken"]:
+            fiche = (ruw.get(v.get("naam")) or v).get("fiche") or {}
+            if fiche.get("tekst"):
+                uit[v["naam"]] = fiche["tekst"]
+        return uit
+    except Exception:
+        return {}
 
 
 def _naam_lookup():
@@ -517,6 +571,15 @@ def _naam_lookup():
     scholen = {s["id"]: s["naam"] for s in winkel.scholen()}
     richtingen = {r["id"]: r for r in winkel.richtingen()}
     return scholen, richtingen
+
+
+def _vak_voor_ui(v):
+    fiche = v.get("fiche")
+    if not fiche or "tekst" not in fiche:
+        return v
+    fiche = {k: w for k, w in fiche.items() if k != "tekst"}
+    fiche["leesbaar"] = True
+    return {**v, "fiche": fiche}
 
 
 def pakket_voor_ui(rij, scholen, richtingen):
@@ -534,7 +597,7 @@ def pakket_voor_ui(rij, scholen, richtingen):
         "ingediendOp": rij.get("ingediend_op"),
         "afwijsReden": rij.get("afwijs_reden"),
         "groepen": rij.get("groepen") or [],
-        "vakken": rij.get("vakken") or [],
+        "vakken": [_vak_voor_ui(v) for v in rij.get("vakken") or []],
         "richtingNaam": richting.get("naam") or "?",
         "schoolNaam": scholen.get(richting.get("school_id")) or "?",
     }
@@ -687,7 +750,10 @@ def _valideer_vakken(vakken, groepen):
         if fiche is not None:
             if not isinstance(fiche, dict) or not str(fiche.get("naam") or "").strip():
                 raise ValidatieFout(f"Ongeldige ECTS-fiche voor '{naam}'.")
+            tekst = fiche.get("tekst")
             fiche = {"naam": str(fiche["naam"])[:MAX_NAAM], "pad": fiche.get("pad") or None}
+            if isinstance(tekst, str) and tekst.strip():
+                fiche["tekst"] = tekst.strip()[:MAX_FICHE_TEKST]
         schoon.append({"naam": naam, "semester": semester, "sp": sp, "fiche": fiche,
                        "groep": groep, "optie": optie})
     return schoon
