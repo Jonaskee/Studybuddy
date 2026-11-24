@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Verbruik · StudieBuddy</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plane: #f9f9f7; --surface: #fcfcfb; --ring: rgba(11,11,11,.10);
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --hover: rgba(11,11,11,.04);
+    --serie: #2a78d6; --track: #cde2fb;
+    --goed: #0ca30c; --let-op: #fab219; --kritiek: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --plane: #0d0d0d; --surface: #1a1a19; --ring: rgba(255,255,255,.10);
+      --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --hover: rgba(255,255,255,.05);
+      --serie: #3987e5; --track: #184f95;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--plane); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .pagina { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+  .bovenlijn { color: var(--muted); font-size: .8rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  h1 { margin: 2px 0 0; font-size: 1.75rem; font-weight: 650; letter-spacing: -.01em; }
+  .meta { display: flex; align-items: center; gap: 14px; color: var(--ink-2); font-size: .85rem; }
+  .live { display: inline-flex; align-items: center; gap: 6px; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--goed); box-shadow: 0 0 0 3px color-mix(in srgb, var(--goed) 25%, transparent); }
+  .meta a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--axis); }
+  .meta a:hover { color: var(--ink); }
+
+  .kaart { background: var(--surface); border-radius: 14px; box-shadow: 0 0 0 1px var(--ring); padding: 20px; }
+  .kaart h2 { margin: 0 0 2px; font-size: 1rem; font-weight: 600; }
+  .kaart .uitleg { margin: 0 0 16px; color: var(--muted); font-size: .85rem; }
+
+  .boven { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 2fr); gap: 16px; margin-bottom: 16px; }
+  .held .label { color: var(--ink-2); font-size: .9rem; }
+  .held .waarde { font-size: 3.25rem; font-weight: 650; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 20px; }
+  .meter + .meter { margin-top: 16px; }
+  .meter-kop { display: flex; justify-content: space-between; gap: 8px; font-size: .85rem; color: var(--ink-2); margin-bottom: 6px; }
+  .meter-kop b { color: var(--ink); font-weight: 600; }
+  .spoor { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .spoor div { height: 100%; border-radius: 4px; background: var(--serie); min-width: 2px; }
+  .spoor .let-op { background: var(--let-op); }
+  .spoor .kritiek { background: var(--kritiek); }
+  .status { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: .8rem; font-weight: 600; color: var(--ink); }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--kleur); }
+
+  .tegels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tegel .label { color: var(--ink-2); font-size: .9rem; }
+  .tegel .waarde { font-size: 2rem; font-weight: 650; line-height: 1.15; margin: 4px 0 2px; }
+  .tegel .klein { color: var(--muted); font-size: .82rem; }
+
+  /* Kolomgrafiek: berichten per uur */
+  .grafiek { margin-bottom: 16px; }
+  .plot { display: grid; grid-template-columns: 32px 1fr; grid-template-rows: 200px auto; column-gap: 8px; }
+  .y-as { position: relative; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+  .y-as span { position: absolute; right: 0; transform: translateY(50%); }
+  .vlak { position: relative; display: grid; grid-template-columns: repeat(24, 1fr); border-bottom: 1px solid var(--axis); }
+  .lijn { position: absolute; left: 0; right: 0; height: 1px; background: var(--grid); }
+  .kolom { position: relative; display: flex; justify-content: center; align-items: flex-end; height: 100%; outline: none; }
+  .kolom:hover, .kolom:focus-visible { background: var(--hover); }
+  .staaf { width: min(24px, 70%); background: var(--serie); border-radius: 4px 4px 0 0; position: relative; }
+  .piekwaarde { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 4px; font-size: .75rem; font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .tip { display: none; position: absolute; z-index: 2; top: -8px; left: 50%; transform: translate(-50%, -100%); background: var(--ink); color: var(--surface); padding: 6px 10px; border-radius: 8px; font-size: .8rem; white-space: nowrap; pointer-events: none; }
+  .tip.links { left: 0; transform: translate(0, -100%); }
+  .tip.rechts { left: auto; right: 0; transform: translate(0, -100%); }
+  .kolom:hover .tip, .kolom:focus-visible .tip { display: block; }
+  .x-as { grid-column: 2; display: grid; grid-template-columns: repeat(24, 1fr); color: var(--muted); font-size: .75rem; padding-top: 6px; font-variant-numeric: tabular-nums; }
+  .x-as span { text-align: center; }
+  .x-as .nu { color: var(--ink); font-weight: 600; }
+  details { margin-top: 14px; font-size: .85rem; color: var(--ink-2); }
+  summary { cursor: pointer; }
+
+  .onder { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: .78rem; padding: 0 10px 8px; border-bottom: 1px solid var(--grid); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th.n, td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.tijd { color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.vraag { word-break: break-word; }
+  .pil { display: inline-block; font: .75rem ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--ink-2); background: var(--hover); box-shadow: 0 0 0 1px var(--ring); padding: 1px 6px; border-radius: 6px; }
+  .nul { color: var(--muted); }
+  .leeg { color: var(--muted); padding: 24px 10px; text-align: center; }
+
+  @media (max-width: 900px) {
+    .boven, .onder { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .pagina { padding: 20px 14px 32px; }
+    .tegels { grid-template-columns: 1fr; }
+    .smal-weg { display: none; }
+    td.vraag { min-width: 9em; }
+    .x-as span:nth-child(3n+2), .x-as span:nth-child(3n+3) { visibility: hidden; }
+  }
+</style>
+</head>
+<body>
+{% set t, v = s.totaal, s.vandaag %}
+{% set pct_dag = ((v.euro / dag_budget * 100) if dag_budget else 100) %}
+{% set pct_totaal = ((t.euro / budget * 100) if budget else 100) %}
+{% macro meter(titel, bedrag, limiet, pct) %}
+  <div class="meter">
+    <div class="meter-kop"><span>{{ titel }}</span><span><b>{{ bedrag | euro }}</b> van {{ limiet | euro(2) }}</span></div>
+    <div class="spoor" role="progressbar" aria-label="{{ titel }}" aria-valuenow="{{ pct | round(1) }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="{{ 'kritiek' if pct >= 100 else 'let-op' if pct >= 80 }}" style="width: {{ [pct, 100] | min | round(1) }}%"></div>
+    </div>
+    {% if pct >= 100 %}<span class="status" style="--kleur: var(--kritiek)">Op: nieuwe vragen worden geweigerd</span>
+    {% elif pct >= 80 %}<span class="status" style="--kleur: var(--let-op)">Bijna op ({{ pct | round | int }}%)</span>{% endif %}
+  </div>
+{% endmacro %}
+
+<div class="pagina">
+  <header>
+    <div>
+      <div class="bovenlijn">StudieBuddy · beheer</div>
+      <h1>Verbruik</h1>
+    </div>
+    <div class="meta">
+      <span class="live">Bijgewerkt om {{ nu.strftime("%H:%M") }} · ververst elke 30 s</span>
+      <a href="/">Naar de chat</a>
+    </div>
+  </header>
+
+  <section class="boven">
+    <div class="kaart held">
+      <div class="label">Kosten vandaag</div>
+      <div class="waarde">{{ v.euro | euro }}</div>
+      {{ meter("Daglimiet", v.euro, dag_budget, pct_dag) }}
+      {{ meter("Totaal budget", t.euro, budget, pct_totaal) }}
+    </div>
+
+    <div class="tegels">
+      <div class="kaart tegel">
+        <div class="label">Berichten vandaag</div>
+        <div class="waarde">{{ v.berichten | getal }}</div>
+        <div class="klein">{{ t.berichten | getal }} in totaal</div>
+      </div>
+      <div class="kaart tegel">
+        <div class="label">Tokens vandaag</div>
+        <div class="waarde">{{ (v.tokens_in + v.tokens_uit) | getal }}</div>
+        <div class="klein">{{ v.tokens_in | getal }} in · {{ v.tokens_uit | getal }} uit · {{ (t.tokens_in + t.tokens_uit) | getal }} in totaal</div>
+      </div>
+      <div class="kaart tegel">
+        <div class="label">Nu actief</div>
+        <div class="waarde">{{ s.actief }}</div>
+        <div class="klein">browsers met een vraag in de laatste 15 min{% if s.bezig %} · {{ s.bezig }} antwoord{{ 'en' if s.bezig > 1 }} bezig{% endif %}</div>
+      </div>
+      <div class="kaart tegel">
+        <div class="label">Bezoekers vandaag</div>
+        <div class="waarde">{{ v.browsers }}</div>
+        <div class="klein">{{ t.browsers }} in totaal · {{ ("max %d vragen per browser" % max_per_browser) if max_per_browser > 0 else "onbeperkt aantal vragen" }}</div>
+      </div>
+    </div>
+  </section>
+
+  <figure class="kaart grafiek" style="margin-left: 0; margin-right: 0;">
+    <h2>Berichten per uur vandaag</h2>
+    <p class="uitleg">Beweeg over een uur voor de details. Piek: {{ piek }} bericht{{ 'en' if piek != 1 }}.</p>
+    <div class="plot" role="img" aria-label="Kolomgrafiek van het aantal berichten per uur vandaag, piek {{ piek }}">
+      <div class="y-as" aria-hidden="true">
+        <span style="bottom: 100%">{{ y_max }}</span>
+        {% if y_max % 2 == 0 %}<span style="bottom: 50%">{{ y_max // 2 }}</span>{% endif %}
+        <span style="bottom: 0">0</span>
+      </div>
+      <div class="vlak">
+        <div class="lijn" style="top: 0"></div>
+        {% if y_max % 2 == 0 %}<div class="lijn" style="top: 50%"></div>{% endif %}
+        {% set piek_getoond = namespace(klaar=false) %}
+        {% for u in s.per_uur %}
+        <div class="kolom{{ ' nu' if u.uur == nu.hour }}" tabindex="0">
+          {% if u.berichten %}
+          <div class="staaf" style="height: {{ (u.berichten / y_max * 100) | round(2) }}%">
+            {% if u.berichten == piek and not piek_getoond.klaar %}<span class="piekwaarde">{{ piek }}</span>{% set piek_getoond.klaar = true %}{% endif %}
+          </div>
+          {% endif %}
+          <div class="tip{{ ' links' if u.uur < 3 else ' rechts' if u.uur > 20 }}">{{ "%02d" | format(u.uur) }}:00 – {{ "%02d" | format((u.uur + 1) % 24) }}:00 · {{ u.berichten }} bericht{{ 'en' if u.berichten != 1 }} · {{ u.euro | euro }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="x-as" aria-hidden="true">
+        {% for u in s.per_uur %}<span class="{{ 'nu' if u.uur == nu.hour }}">{{ "%02d" | format(u.uur) if u.uur % 3 == 0 or u.uur == nu.hour else "" }}</span>{% endfor %}
+      </div>
+    </div>
+    <details>
+      <summary>Toon als tabel</summary>
+      <table>
+        <tr><th>Uur</th><th class="n">Berichten</th><th class="n">Kosten</th></tr>
+        {% for u in s.per_uur if u.berichten %}
+        <tr><td>{{ "%02d" | format(u.uur) }}:00 – {{ "%02d" | format((u.uur + 1) % 24) }}:00</td><td class="n">{{ u.berichten }}</td><td class="n">{{ u.euro | euro }}</td></tr>
+        {% else %}
+        <tr><td colspan="3" class="leeg">Vandaag nog geen berichten.</td></tr>
+        {% endfor %}
+      </table>
+    </details>
+  </figure>
+
+  <section class="onder">
+    <div class="kaart">
+      <h2>Laatste vragen</h2>
+      <p class="uitleg">De 25 meest recente, nieuwste bovenaan.</p>
+      <table>
+        <tr><th>Tijd</th><th class="smal-weg">Browser</th><th>Vraag</th><th class="n smal-weg">Tokens</th><th class="n">Kosten</th></tr>
+        {% for b in s.laatste %}
+        <tr>
+          <td class="tijd">{{ b.tijd }}</td>
+          <td class="smal-weg"><span class="pil">{{ b.browser or "terminal" }}</span></td>
+          <td class="vraag">{{ b.vraag }}</td>
+          <td class="n smal-weg">{% if b.klaar %}{{ ((b.tokens_in or 0) + (b.tokens_uit or 0)) | getal }}{% else %}<span class="nul">bezig…</span>{% endif %}</td>
+          <td class="n">{{ b.euro | euro(5) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="leeg">Nog geen vragen.</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <div class="kaart">
+      <h2>Per dag</h2>
+      <p class="uitleg">Laatste 14 dagen.</p>
+      <table>
+        <tr><th>Dag</th><th class="n">Berichten</th><th class="n">Bezoekers</th><th class="n">Kosten</th></tr>
+        {% for d in s.per_dag %}
+        <tr class="{{ 'nul' if not d.berichten }}">
+          <td>{{ d.dag }}</td><td class="n">{{ d.berichten }}</td><td class="n">{{ d.browsers }}</td><td class="n">{{ d.euro | euro }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+</div>
+</body>
+</html>

@@ -17,6 +17,8 @@ en de schermen verwachten (camelCase + richtingNaam/schoolNaam).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -37,8 +39,12 @@ ACADEMIEJAREN = ["2026-2027", "2025-2026"]
 
 MAX_NAAM = 120
 MAX_TEKST = 1000
-MAX_FICHE_BYTES = 10 * 1024 * 1024
+MAX_FICHE_BYTES = 4 * 1024 * 1024  # zelfde grens als de frontend; Vercel laat per request max. ~4,5 MB door
 FICHE_BUCKET = "ects-fiches"
+# Ondertekent de tekst die de server uit een PDF haalde: zo kan niemand zelf "fichetekst" meesturen bij een pakket
+# zonder echte PDF. Op Vercel bestaat R33_API_KEY altijd, zodat elke serverinstantie dezelfde sleutel heeft.
+_FICHE_GEHEIM = hashlib.sha256(("studiebuddy-fiche\n" + (os.getenv("SECRET_KEY") or os.getenv("SUPABASE_SERVER_SLEUTEL")
+                                or os.getenv("R33_API_KEY") or secrets.token_hex(32))).encode()).digest()
 
 
 class OpslagFout(Exception):
@@ -342,20 +348,14 @@ class SupabaseOpslag:
 
     def __init__(self, url: str, sleutel: str):
         basis = url.rstrip("/")
+        # De oude service_role-key is een JWT en mag ook als Bearer; een nieuwe sb_secret_-key enkel als apikey.
+        auth = {"apikey": sleutel, **({"Authorization": f"Bearer {sleutel}"} if sleutel.startswith("eyJ") else {})}
         self.client = httpx.Client(
             base_url=basis + "/rest/v1",
-            headers={
-                "apikey": sleutel,
-                "Authorization": f"Bearer {sleutel}",
-                "Content-Type": "application/json",
-            },
+            headers={**auth, "Content-Type": "application/json"},
             timeout=20,
         )
-        self.storage = httpx.Client(
-            base_url=basis + "/storage/v1",
-            headers={"apikey": sleutel, "Authorization": f"Bearer {sleutel}"},
-            timeout=60,
-        )
+        self.storage = httpx.Client(base_url=basis + "/storage/v1", headers=auth, timeout=60)
 
     def _controleer(self, antwoord):
         if antwoord.status_code >= 400:
@@ -482,7 +482,8 @@ _opslag_slot = threading.Lock()
 
 def maak_opslag():
     url = (os.getenv("SUPABASE_URL") or "").strip()
-    sleutel = (os.getenv("SUPABASE_SERVER_SLEUTEL") or os.getenv("SUPABASE_KEY") or "").strip()
+    # Eigen naam: SUPABASE_KEY is de publieke key (kan hier niets) en SUPABASE_SERVER_SLEUTEL de verbruikssleutel.
+    sleutel = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
     if url.startswith("http") and sleutel:
         return SupabaseOpslag(url, sleutel)
     pad = os.getenv("DATA_BESTAND") or ("/tmp/studiebuddy-data.json" if os.getenv("VERCEL") else str(MAP / "data_store.json"))
@@ -532,26 +533,31 @@ def pdf_naar_tekst(inhoud: bytes) -> str:
     return tekst[:MAX_FICHE_TEKST]
 
 
+def handtekening(tekst: str) -> str:
+    return hmac.new(_FICHE_GEHEIM, tekst.encode(), hashlib.sha256).hexdigest()
+
+
 def bewaar_fiche(naam, inhoud):
     """PDF in Supabase Storage (of lokaal) bewaren + de tekst eruit halen voor de chat."""
     if len(inhoud) > MAX_FICHE_BYTES:
-        raise ValidatieFout("Het bestand is te groot (max. 10 MB).")
+        raise ValidatieFout("Het bestand is te groot (max. 4 MB).")
     if not inhoud.lstrip()[:5].startswith(b"%PDF"):
         raise ValidatieFout(f"'{Path(naam).name}' is geen geldige PDF.")
     resultaat = huidige_opslag().bewaar_fiche(naam, inhoud)
     tekst = pdf_naar_tekst(inhoud)
     resultaat["tekst"] = tekst
+    resultaat["handtekening"] = handtekening(tekst) if tekst else None
     if not tekst:
         extra = "Uit deze PDF kon geen tekst gehaald worden (scan?); de chat kan hem niet lezen."
         resultaat["waarschuwing"] = (resultaat.get("waarschuwing", "") + " " + extra).strip()
     return resultaat
 
 
-def fiche_teksten(student_id):
+def fiche_teksten(student_id, volledig=None):
     """Vaknaam -> fichetekst voor de vakken die deze student volgt (uit geüploade PDF's).
     Faalt nooit: zonder pakket of bij een opslagfout gewoon een lege dict."""
     try:
-        volledig = haal_mijn_pakket_volledig(student_id)
+        volledig = volledig or haal_mijn_pakket_volledig(student_id)
         if not volledig:
             return {}
         basis = huidige_opslag().pakket(volledig["mijn"]["basisPakketId"]) or {}
@@ -751,8 +757,10 @@ def _valideer_vakken(vakken, groepen):
             if not isinstance(fiche, dict) or not str(fiche.get("naam") or "").strip():
                 raise ValidatieFout(f"Ongeldige ECTS-fiche voor '{naam}'.")
             tekst = fiche.get("tekst")
+            echt = isinstance(tekst, str) and hmac.compare_digest(
+                str(fiche.get("handtekening") or "").encode(), handtekening(tekst).encode())
             fiche = {"naam": str(fiche["naam"])[:MAX_NAAM], "pad": fiche.get("pad") or None}
-            if isinstance(tekst, str) and tekst.strip():
+            if echt and tekst.strip():  # enkel tekst die de server zelf uit een geüploade PDF haalde
                 fiche["tekst"] = tekst.strip()[:MAX_FICHE_TEKST]
         schoon.append({"naam": naam, "semester": semester, "sp": sp, "fiche": fiche,
                        "groep": groep, "optie": optie})
@@ -837,20 +845,34 @@ def sla_mijn_pakket_op(student_id, gegevens):
     if not isinstance(eigen, list):
         raise ValidatieFout("Ongeldige eigen vakken.")
     schoon_eigen = []
+    if len(eigen) > 30 or len(keuzes) > 50:
+        raise ValidatieFout("Te veel eigen vakken of keuzes.")
     for v in eigen:
         if not isinstance(v, dict) or not str(v.get("naam") or "").strip():
             raise ValidatieFout("Ongeldig eigen vak.")
+        try:
+            sp = int(v.get("sp") or 0)
+        except (TypeError, ValueError):
+            raise ValidatieFout(f"Ongeldig aantal studiepunten voor '{str(v['naam'])[:MAX_NAAM]}'.")
         schoon_eigen.append({
             "naam": str(v["naam"]).strip()[:MAX_NAAM],
-            "semester": str(v.get("semester") or "1"),
-            "sp": int(v.get("sp") or 0),
+            "semester": str(v.get("semester") or "1") if str(v.get("semester") or "1") in SEMESTERS else "1",
+            "sp": max(0, min(sp, 60)),
         })
+    def lijst(sleutel):
+        waarde = gegevens.get(sleutel) or []
+        if not isinstance(waarde, list):
+            raise ValidatieFout("Ongeldige aanvraag.")
+        return [str(x)[:MAX_NAAM] for x in waarde[:100] if x]
+
     rij = {
         "student_id": student_id,
         "basis_pakket_id": basis,
-        "uitgezet": [str(x) for x in (gegevens.get("uitgezet") or []) if x],
-        "overgeslagen": [str(x) for x in (gegevens.get("overgeslagen") or []) if x],
-        "keuzes": keuzes,
+        "uitgezet": lijst("uitgezet"),
+        "overgeslagen": lijst("overgeslagen"),
+        # enkel {groep: [namen]}: de keuzes komen terug in de UI en in de chat
+        "keuzes": {str(g)[:MAX_NAAM]: [str(x)[:MAX_NAAM] for x in (w if isinstance(w, list) else [])[:50]]
+                   for g, w in keuzes.items()},
         "eigen_vakken": schoon_eigen,
     }
     winkel.bewaar_persoonlijk(rij)
@@ -939,7 +961,12 @@ def haal_wachtrij():
     pakketten = []
     for rij in winkel.pakketten():
         if rij["status"] == "in_controle":
-            pakketten.append({**pakket_voor_ui(rij, scholen, richtingen), "checks": checks_voor(rij)})
+            ui = pakket_voor_ui(rij, scholen, richtingen)
+            # De moderator moet de fichetekst zelf kunnen lezen: die komt na goedkeuring in de chat van anderen.
+            ui["fiches"] = [{"vak": v.get("naam"), "naam": (v.get("fiche") or {}).get("naam"),
+                             "tekst": ((v.get("fiche") or {}).get("tekst") or "")[:6000]}
+                            for v in rij.get("vakken") or [] if v.get("fiche")]
+            pakketten.append({**ui, "checks": checks_voor(rij)})
     voorstellen = []
     for rij in winkel.voorstellen("in_controle"):
         basis = winkel.pakket(rij["pakket_id"])

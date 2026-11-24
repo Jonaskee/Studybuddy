@@ -159,7 +159,11 @@
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <span class="cap">ECTS-FICHES</span>
-          ${p.vakken.filter((v) => v.fiche).map((v) => `<span style="font-weight: 600;">${esc(v.fiche.naam)}</span>`).join("") || `<span class="muted">Geen</span>`}
+          ${(p.fiches || []).map((f) => `<details><summary style="font-weight: 600; cursor: pointer;">${esc(f.vak)} · ${esc(f.naam)}</summary>
+            ${f.tekst ? `<pre style="white-space: pre-wrap; max-height: 320px; overflow: auto; font: inherit; font-size: 13px;">${esc(f.tekst)}</pre>`
+                      : `<span class="muted">Geen leesbare tekst: de chat gebruikt deze fiche niet.</span>`}</details>`).join("")
+            || `<span class="muted">Geen</span>`}
+          <span class="muted" style="font-size: 13px;">Na goedkeuring gebruikt de chat deze tekst als bron voor iedereen met dit pakket: lees hem na.</span>
         </div>
       </div>
       ${redenSelect()}

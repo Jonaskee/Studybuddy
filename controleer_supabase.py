@@ -29,16 +29,18 @@ def soort_sleutel(k):
 
 def main():
     url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
-    sleutel = (os.getenv("SUPABASE_SERVER_SLEUTEL") or "").strip()
+    sleutel = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
     print(f"SUPABASE_URL:            {'ingevuld' if url.startswith('https://') else 'ONTBREEKT of fout'}")
-    print(f"SUPABASE_SERVER_SLEUTEL: {soort_sleutel(sleutel)}")
-    if os.getenv("SUPABASE_KEY", "").strip().startswith("sb_publishable_"):
-        print("SUPABASE_KEY:            publishable key – mag weg uit .env (wordt niet gebruikt als de server-sleutel er staat)")
+    print(f"SUPABASE_SERVICE_KEY:    {soort_sleutel(sleutel)}")
+    publiek = os.getenv("SUPABASE_KEY", "").strip()
+    print(f"SUPABASE_KEY:            {'publishable key – goed (voor de standaardfiches)' if publiek.startswith(('sb_publishable_', 'eyJ')) else 'ONTBREEKT'}")
+    print(f"SUPABASE_SERVER_SLEUTEL: {'ingevuld (verbruik en limieten)' if os.getenv('SUPABASE_SERVER_SLEUTEL') else 'ONTBREEKT – de chat start niet'}")
     if not url or not sleutel:
-        print("\nVul eerst SUPABASE_URL en SUPABASE_SERVER_SLEUTEL in.")
+        print("\nVul eerst SUPABASE_URL en SUPABASE_SERVICE_KEY (de service_role-key) in.")
         return
 
-    kop = {"apikey": sleutel, "Authorization": f"Bearer {sleutel}"}
+    # Een nieuwe sb_secret_-key mag enkel als apikey; de oude service_role-JWT ook als Bearer.
+    kop = {"apikey": sleutel, **({"Authorization": f"Bearer {sleutel}"} if sleutel.startswith("eyJ") else {})}
     alles_ok = True
     print()
     for tabel in TABELLEN:

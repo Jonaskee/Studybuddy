@@ -2,3 +2,4 @@ httpx
 python-dotenv
 flask
 pypdf
+tzdata

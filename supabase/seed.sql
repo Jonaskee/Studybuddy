@@ -1,12 +1,7 @@
--- Eerste pakket: de 8 ECTS-fiches die eerst in context/ stonden. Publiek en goedgekeurd.
-with s as (insert into public.scholen (naam, aliassen, email_domein, status)
-  values ('Artesis Plantijn Hogeschool Antwerpen', '{AP,AP Hogeschool}', 'ap.be', 'goedgekeurd') returning id),
-r as (insert into public.richtingen (school_id, naam, afstudeerrichting, status)
-  select id, 'Toegepaste Informatica', 'Artificiële Intelligentie', 'goedgekeurd' from s returning id),
-p as (insert into public.pakketten (richting_id, academiejaar, trajectschijf, zichtbaarheid, status)
-  select id, '2026-27', 3, 'publiek', 'goedgekeurd' from r returning id)
-insert into public.vakken (pakket_id, naam, studiepunten, semester, fiche_md)
-select p.id, v.naam, v.studiepunten, v.semester, v.fiche_md from p, (values
+-- De 8 standaard ECTS-fiches (AP, Toegepaste Informatica, Artificiële Intelligentie, 3e bachelor, 2026-27).
+-- Ze stonden eerst in context/; de chat haalt er zijn bronnen uit. Pakketten en scholen: zie ../supabase.sql.
+insert into public.vakken (naam, studiepunten, semester, fiche_md)
+select v.naam, v.studiepunten, v.semester, v.fiche_md from (values
   ('AI and Society', 3, 'Semester 1', $fiche$# ECTS-fiche: AI and Society
 
 **Artesis Plantijn Hogeschool Antwerpen**  
@@ -1019,3 +1014,17 @@ De leerinhouden worden jaarlijks herbekeken op basis van:
   Voor de voorwaarden voor het inhalen van een afwezigheid op een (deel)examen binnen en buiten de examenreeksen: zie het onderwijs- en examenreglement.  
   *Buiten de examenreeks geldt aanvullend nog het volgende:* Niet elke evaluatieactiviteit kan ingehaald worden wegens organisatorische of didactische redenen.$fiche$)
 ) as v (naam, studiepunten, semester, fiche_md);
+
+-- Bijnamen waarmee studenten naar een vak vragen (gebruikt door genoemde_vakken() in assistent.py).
+update public.vakken v set aliassen = a.aliassen
+from (values
+  ('Bachelorproef en stage', '{bap,bachelorproef,stage,thesis}'::text[]),
+  ('Project Start up', '{startup,start-up,"start up","project start"}'),
+  ('Applied AI project', '{"applied ai","ai project","ai-project"}'),
+  ('Sustainable IT', '{sustainable,duurzame it}'),
+  ('IT professional', '{"it professional","it-professional"}'),
+  ('AI and Society', '{"ai and society","ai & society",society}'),
+  ('AI for Business', '{"ai for business","ai voor business"}'),
+  ('Trends in AI', '{trends,"trends in ai"}')
+) as a(naam, aliassen)
+where v.naam = a.naam;

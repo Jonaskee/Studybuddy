@@ -71,7 +71,9 @@ const SB = (() => {
         } catch (fout) {
           throw new Error(`Upload van "${bestand.name}" mislukt: ${fout.message}`);
         }
-        uit.push({ naam: fiche.naam, grootte: bestand.size, pad: fiche.pad || null, tekst: fiche.tekst || "", waarschuwing: fiche.waarschuwing });
+        // handtekening: bewijs van de server dat de tekst echt uit deze PDF komt (anders negeert de server de tekst)
+        uit.push({ naam: fiche.naam, grootte: bestand.size, pad: fiche.pad || null, tekst: fiche.tekst || "",
+                   handtekening: fiche.handtekening || null, waarschuwing: fiche.waarschuwing });
       }
       return uit;
     },

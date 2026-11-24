@@ -500,7 +500,8 @@
           });
         }
         return { naam: v.naam, semester: v.semester, sp: v.sp,
-                 fiche: f ? { naam: f.naam, pad: f.pad || null, tekst: f.tekst || undefined } : null, groep, optie: v.optie };
+                 fiche: f ? { naam: f.naam, pad: f.pad || null, tekst: f.tekst || undefined, handtekening: f.handtekening || undefined } : null,
+                 groep, optie: v.optie };
       });
       const pakket = await SB.maakPakket({
         schoolNaam: state.school, richtingNaam: state.richting,

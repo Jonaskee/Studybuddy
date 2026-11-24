@@ -104,6 +104,18 @@
   .user { align-self: flex-end; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 4px; }
   .typen { color: var(--muted); font-style: italic; }
   .systeem { align-self: center; background: transparent; color: var(--muted); font-size: .85rem; padding: 2px 10px; border: 1px dashed var(--border); border-radius: 999px; }
+  /* bronvermelding: nummertje achter een feit, onderaan de bron uit de ECTS-fiche om open te klappen */
+  .ref {
+    font: 700 .7rem/1 Inter, system-ui, sans-serif; vertical-align: super; margin: 0 1px 0 2px; padding: 2px 5px;
+    border: 0; border-radius: 6px; background: var(--accent); color: var(--accent-text); cursor: pointer;
+  }
+  .bronnen { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-size: .85rem; color: var(--muted); white-space: normal; }
+  .bronnen summary { cursor: pointer; padding: 2px 0; color: var(--text); }
+  .brontekst {
+    white-space: pre-wrap; max-height: 260px; overflow: auto; margin: 6px 0 8px; padding: 10px 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: .8rem;
+  }
+  .geen-bron { color: var(--muted); font-style: italic; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   #mijn-pakket { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: .9rem; }
   #mijn-pakket strong { font-size: .95rem; }
@@ -172,10 +184,47 @@
   const knop = document.getElementById("verstuur");
   const context = document.getElementById("context");
 
-  function toonBericht(rol, tekst, extraKlasse) {
+  // Antwoord met bronnummers ([B3] -> 1) en daaronder de bronnen, open te klappen met de tekst uit de ECTS-fiche.
+  function vulMetBronnen(div, tekst, bronnen) {
+    const lijst = document.createElement("div");
+    lijst.className = "bronnen";
+    const open = {};
+    bronnen.forEach((b, i) => {
+      const d = document.createElement("details");
+      const s = document.createElement("summary");
+      s.textContent = `${i + 1} · ${b.vak} — ${b.titel}`;
+      const t = document.createElement("div");
+      t.className = "brontekst";
+      t.textContent = String(b.tekst).replaceAll("**", "");
+      d.append(s, t);
+      lijst.append(d);
+      open[b.label] = [i + 1, d, `${b.vak} — ${b.titel}`];
+    });
+    if (!bronnen.length) {
+      lijst.innerHTML = '<span class="geen-bron">Geen bron uit de ECTS-fiches vermeld: controleer dit antwoord zelf.</span>';
+    }
+    for (const deel of String(tekst).split(/(\[B\d+\])/)) {
+      const m = deel.match(/^\[(B\d+)\]$/);
+      if (!m) { div.append(deel); continue; }
+      if (!open[m[1]]) continue;
+      const [nr, details, naam] = open[m[1]];
+      const knopje = document.createElement("button");
+      knopje.className = "ref";
+      knopje.type = "button";
+      knopje.textContent = nr;
+      knopje.title = `Bron ${nr}: ${naam}`;
+      knopje.setAttribute("aria-label", `Bron ${nr}: ${naam}`);
+      knopje.onclick = () => { details.open = true; details.scrollIntoView({ block: "nearest" }); };
+      div.append(knopje);
+    }
+    div.append(lijst);
+  }
+
+  function toonBericht(rol, tekst, extraKlasse, bronnen) {
     const div = document.createElement("div");
     div.className = `bericht ${rol} ${extraKlasse || ""}`;
-    div.textContent = tekst;
+    if (Array.isArray(bronnen)) vulMetBronnen(div, tekst, bronnen);
+    else div.textContent = tekst;
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
     return div;
@@ -189,9 +238,9 @@
   function gesprek() {
     try { return JSON.parse(localStorage.getItem(OPSLAG)) || []; } catch { return []; }
   }
-  function bewaar(rol, tekst) {
+  function bewaar(rol, tekst, bronnen) {
     try {
-      const alles = [...gesprek(), { rol, tekst }].slice(-50);
+      const alles = [...gesprek(), { rol, tekst, bronnen }].slice(-50);
       localStorage.setItem(OPSLAG, JSON.stringify(alles));
     } catch { /* vol of privémodus */ }
   }
@@ -244,8 +293,9 @@
       const data = await res.json().catch(() => ({ fout: `Fout ${res.status}: probeer later opnieuw.` }));
       typen.remove();
       const tekst = data.antwoord || data.fout || "Geen antwoord ontvangen.";
-      toonBericht("assistant", tekst);
-      bewaar("assistant", tekst);
+      const bronnen = data.antwoord ? data.bronnen : null;  // enkel bij een echt antwoord met context aan
+      toonBericht("assistant", tekst, "", bronnen);
+      bewaar("assistant", tekst, bronnen);
       if (data.vorige_vragen) toonGeschiedenis(data.vorige_vragen);
       if (data.resterend !== undefined) toonTeller(data.resterend);
     } catch {
@@ -272,7 +322,7 @@
   // Gesprek van de vorige keer terugzetten.
   const opgeslagen = gesprek();
   for (const bericht of opgeslagen) {
-    toonBericht(bericht.rol === "user" ? "user" : "assistant", String(bericht.tekst || ""));
+    toonBericht(bericht.rol === "user" ? "user" : "assistant", String(bericht.tekst || ""), "", bericht.bronnen);
   }
   if (!opgeslagen.length) toonBericht("assistant", "Hallo! Ik ben je StudieBuddy. Wat wil je weten?");
   toonGeschiedenis([]);
